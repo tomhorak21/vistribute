@@ -1,0 +1,4008 @@
+<div class="section section-visible collapsed" data-id="DwBQbXcg" name="Vistribute" data-type="package"><div class="paragraph body-paragraph collapsed" name="Documentation" data-id="6z3iq8VQ"><div data-type="content" type="text/html" codemirror="true" contenteditable="true" class="section-documentation"><h2>Description</h2>
+<div>Your description...</div></div></div><div class="paragraph data-paragraph collapsed" name="Properties" data-id="Niuc9rrk"><pre data-type="content" type="application/json" class="section-properties">{
+  "version": "0.1.8",
+  "icon": "important_devices",
+  "description": "Automatically distributes vistrate views across available devices.",
+  "dependencies": [
+    {
+			"id": "kTKppb2i",
+			"name": "Vistrate",
+			"optional": false
+		}
+  ],
+  "changelog": {
+    "0.0.1": "Initial version.",
+    "0.0.2": "Enabled view board toggling via toolbar or shortcut (mod+o). Improved data handling.",
+    "0.0.3": "Added virtual device abstraction. Added functionality to move back views when vistribute overlay is closed.",
+    "0.0.4": "Renamed virtual devices to surfaces. Improved checks to avoid invalid states.",
+    "0.0.5": "Added basic constraint handling (e.g., to exclude views or deivces from distribution). Added first alpha version of a control panel. Some fixes.",
+    "0.0.6": "Updated retrieving/storing/handling of device data. Removed dependency to Device Manager.",
+    "0.0.7": "Improvment of control panel; still in alpha.",
+    "0.0.8": "Improved control panel: added surface and distribution preview; added action bar; added support to ignore/unignore selected views or surfaces.",
+    "0.0.9": "Extended retrieving of view properties. Standard comp properties plus hasSvg (= is visualization) and dataPoints.",
+    "0.0.10": "Added comparison of visual similartiy based on view properties; views get points for matching properties. Currently considering template (3p), props (2p), size (1p), and dataPoints (1p).",
+    "0.0.11": "Added initial view-surface-assignment algorithm based on view space requirement and available surface space. First matching groups (views with visual similarity &gt;= 5), then all other views.",
+    "0.0.12": "Added first local-layout-algortihm. Groups are put into columns and possibly sub-rows.",
+    "0.0.13": "Incorporated a constrained layout library (autolayout.js) to optimize the previous determined column layout.",
+    "0.1.0": "Many fixes and improvements to distribution and layout algortihms. First version with a working 'vistribution'.",
+    "0.1.1": "Applied improvement and fixes to distribution/local layouting. Discard usage of autolayout.js",
+    "0.1.2": "Introduced a minimap feature highlighting current distribution as well as changes.",
+    "0.1.3": "Improved functionality of control panel by supporting further constraint definitions.",
+    "0.1.4": "Added first version of data observer, analyzing the dataflow for connectivity and data similarity between views. An exclusive connectivity is considered in the distribution.",
+    "0.1.5": "New control panel.",
+    "0.1.6": "Improved layouting: better alignment of columns.",
+    "0.1.7": "Only consider view updates when view joins/leaves.",
+    "0.1.8": "Minor fixes and cleanup",
+    "0.1.9": "Fixed issues in device observer config"
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="nTUC3pLr" name="Component Observer" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" class="viscontroller" id="vistributeCompObserver">vc = {
+	init: function() {
+		this.callback = () =&gt; {
+			this.output = {};
+		};
+		Vistrate.observeVistrate(this.callback);
+	},
+	destroy: function() {
+		Vistrate.removeObserverFromVistrate(this.callback);
+	}
+};</pre></div><div class="paragraph code-paragraph collapsed" data-id="buR6M9MF" name="Component Observer Throttle" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" class="viscontroller" id="vistributeCompThrottle">vc = {
+	data: 'vistributeCompThrottle-data',
+	src: ["observer"],
+	update: function() {
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+		}
+		this.timeout = setTimeout(() =&gt; {
+			this.output = this.src.observer.output;
+		}, 1000);
+	},
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="WUvGu58x" name="Component Observer Throttle Data" style="" draggable="false"><pre data-type="content" type="application/json" id="vistributeCompThrottle-data" class="visdata">{
+  "config": {
+    "src": {"observer": "vistributeCompObserver"}
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="UK34fpSD" name="View Observer" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeViewObserver" class="viscontroller">vc = {
+  data: 'vistributeViewObserver-data',
+  src: ['componentObserverThrottle'],
+	init: function() {
+    // Import from Vistrate package
+    const ObservableOutput = require("#observableOutput").ObservableOutput;
+    
+    this.codestrateLoaded = Codestrate.loaded;
+    this.compsLoaded = false;
+    
+    this.onCodestrateLoaded = () =&gt; {
+      this.codestrateLoaded = true;
+      this.analyzeViews();
+    };
+    
+    this.observedComps = new Set();
+    
+    this.analyzeViews = () =&gt; {
+      let consideredViews = {};
+      let pairs = {};
+      
+      for (let compKey in Vistrate.outputs) {
+        if (compKey === this.id)
+          continue;
+        
+        let comp = Vistrate.getOutput(compKey);
+        
+        let section = comp.paragraph.closest('.section');
+        if (section.classList.contains("section-hidden") || section.getAttribute("data-type") !== "viscomponent") continue;
+        
+        if (!this.observedComps.has(compKey) &amp;&amp; comp instanceof ObservableOutput) {
+          comp.observe(this.update);
+          this.observedComps.add(compKey);
+        }
+        
+        if (!comp.src || !comp.config.src || Object.keys(comp.config.src).length === 0)
+          continue;
+           
+        if (comp.view === undefined) continue;
+
+        let compData = {
+          id: compKey,
+          template: comp.template,
+          friendlyName: comp.friendlyName,
+          size: comp.config.size,
+          props: comp.config.props,
+          src: comp.config.src,
+          hasSvg: comp.view.element.querySelector('svg') ? true : false
+        };
+        
+        let datakey = compData.src.data ? 'data' : Objects.keys(compData.src)[0];
+        if (comp.src[datakey] &amp;&amp; comp.src[datakey].output)
+          compData.dataPoints = comp.src[datakey].output.length;
+        else
+          compData.dataPoints = 0;
+        
+        if (!compData.dataPoints)
+          continue;
+        
+        consideredViews[compKey] = compData;
+      }
+      
+      let compsLoaded = true;
+      if (!this.compsLoaded) {
+        if (Object.keys(consideredViews).length === 0)
+          compsLoaded = false;
+        for (let compKey in consideredViews) {
+          let comp = Vistrate.getOutput(compKey);
+          let datakey = comp.config.src.data ? 'data' : Objects.keys(comp.config.src)[0];
+          if (comp.src[datakey] &amp;&amp; comp.src[datakey].output) {
+          } else {
+            compsLoaded = false;
+          }
+        }      
+      }
+      
+      if (this.output &amp;&amp; Object.keys(consideredViews).length !== Object.keys(this.output.views).length) {
+        compsLoaded = false;
+      }
+      
+      if (compsLoaded !== this.compsLoaded || this.config.updateOnAllChanges) {
+        let output = this.output ? this.output.views : undefined;
+        if (Object.keys(consideredViews).length &gt; 0 &amp;&amp; !this.areObjectsEqual(consideredViews, output)) {
+          this.output = {
+            views: consideredViews,
+            visualSimilarity: pairs
+          };
+        }
+        this.updateVisualSimilarity(consideredViews, pairs);
+      }
+      
+      this.compsLoaded = compsLoaded;
+    };
+    
+    this.updateVisualSimilarity = (views, pairs) =&gt; {
+      let consideredKeys = this.config.similarityConsideredKeys;
+      for (let viewOneId in views) {
+        for (let viewTwoId in views) {
+          if (viewOneId === viewTwoId || pairs[viewOneId + ":" + viewTwoId])
+            continue;
+          
+          let score = 0;
+          
+          for (let key of consideredKeys) {
+           if (this.areObjectsEqual(views[viewOneId][key], views[viewTwoId][key]))
+             score += this.similarityRating(key);
+          }
+          
+          pairs[viewOneId + ":" + viewTwoId] = score;
+          pairs[viewTwoId + ":" + viewOneId] = score;
+        }
+      }
+    };
+    
+    this.similarityRating = (key) =&gt; {
+      switch (key) {
+        case "template":
+          return 3;
+        case "props":
+          return 2;
+        default:
+          return 1;
+      }
+    };
+    
+    this.areObjectsEqual = (one, two) =&gt; {
+      if (!one || !two || Object.keys(one).length !== Object.keys(two).length)
+          return false;
+      
+      for (let key in one) {
+        if (typeof one[key] !== typeof two[key])
+          return false;
+        
+        if (typeof one[key] === "object" &amp;&amp; !this.areObjectsEqual(one[key], two[key]))
+          return false;
+        
+        if (typeof one[key] !== "object" &amp;&amp; one[key] !== two[key])
+          return false;
+      }
+      return true;
+    };
+    
+    window.addEventListener("codestrateloaded", this.onCodestrateLoaded);
+	},
+	destroy: function() {
+		window.removeEventListener("codestrateloaded", this.onCodestrateLoaded);
+	},
+  update: function(source) {
+    if (this.analyzeViews &amp;&amp; this.codestrateLoaded) {
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+      }
+      this.timeout = setTimeout(() =&gt; {
+        this.analyzeViews();
+      }, 1000);
+    }
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="pWdts8JT" name="View Observer Data"><pre data-type="content" type="application/json" id="vistributeViewObserver-data" class="visdata">{
+  "config": {
+    "src": {"componentObserverThrottle": "vistributeCompThrottle"},
+    "updateOnAllChanges": false,
+    "similarityConsideredKeys": ["template", "size", "props", "dataPoints"]
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="qRP3YUfT" name="Data Observer" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeDataObserver" class="viscontroller">vc = {
+  data: 'vistributeDataObserver-data',
+  src: ['views'],
+  init: function() {
+    
+    this.connectivity = () =&gt; {
+      let views = this.src.views.output.views;
+      let connections = {}; 
+      for (let vIdOne in views) {
+        for (let vIdTwo in views) {
+          if(vIdOne !== vIdTwo){
+            let con = this.getConnection(vIdOne, vIdTwo, []);
+            if (con)
+              connections[vIdOne + ":" + vIdTwo] = con; 
+          }
+        }
+      }
+      return connections;
+    };
+    
+    this.getConnection = (from, to, seen) =&gt; {
+      const from_comp = Vistrate.getOutput(from);
+      const to_comp = Vistrate.getOutput(to);
+      const sources = Object.keys(from_comp.src);
+      let connection;
+      let singleSource = sources.length === 1;
+      for (let srcName of sources) {
+        if (!to_comp.src[srcName])
+          continue;
+        let srcId = to_comp.src[srcName].id;
+        if(srcId === from_comp.id){
+          connection = singleSource ? "exclusive" : "additional";
+        } else {
+          seen.push(from + to);
+          if(!seen.includes(from + srcId)){
+            let temp = this.getConnection(from, srcId, seen);
+            if(!connection &amp;&amp; temp)
+              connection = singleSource ? temp : "additional";
+          }
+        }
+      }
+      return connection;
+    };
+    
+    this.sharedProperties = () =&gt; {
+      let views = this.src.views.output;
+      let sharedProperties = {};
+      views.forEach((v1) =&gt; {
+        views.forEach((v2) =&gt; {
+          if(v1 !== v2 &amp;&amp; sharedProperties[v1+v2] === undefined &amp;&amp; sharedProperties[v2+v1] === undefined){
+            let v1_ps = this.properties(v1);
+            let v1_data = this.dataSourceProperties(v1);
+            let v1_data_ps = [];
+            Object.keys(v1_data).forEach((id) =&gt; {
+              v1_data_ps = v1_data_ps.concat(v1_data[id]);
+            });
+            let v2_ps = this.properties(v2);
+            let v2_data = this.dataSourceProperties(v2);
+            let v2_data_ps = [];
+            Object.keys(v2_data).forEach((id) =&gt; {
+              v2_data_ps = v2_data_ps.concat(v2_data[id]);
+            });
+            
+            let count = 0;
+            let v1_count = 0;          
+            v1_ps.forEach((p) =&gt; {
+              if(v2_ps.includes(p) &amp;&amp; v1_data_ps.includes(p)){
+                count += 1;
+              }
+              if(v1_data_ps.includes(p)){
+                v1_count += 1;
+              }
+            });
+            let v2_count = 0;
+            v2_ps.forEach((p) =&gt; {
+              if(v2_data_ps.includes(p)){
+                v2_count += 1;
+              }
+            });
+            sharedProperties[v1+v2] = {v1: v1, v2: v2, v1_total: v1_count, v1_source: v1_data_ps.length, v2_total: v2_count, v2_source: v2_data_ps.length, common: count};
+          }
+        });
+      });
+      return sharedProperties;
+    };
+    
+    this.properties = (id) =&gt; {
+      const comp = Vistrate.getOutput(id);
+      const result = [];
+      Object.keys(comp.config.props).forEach((p) =&gt; {
+        result.push(comp.config.props[p].prop);
+      });
+      return result;
+    };
+    
+    this.dataSourceProperties = (id) =&gt; {
+      const comp = Vistrate.getOutput(id);
+      const sources = Object.keys(comp.src);
+      let result = {};
+      if(sources.length === 0){
+        
+        if(comp.output !== null &amp;&amp; comp.output !== undefined){
+          if(Array.isArray(comp.output)){
+            result[comp.id] = Object.keys(comp.output[0]);
+          }
+          else{
+             result[comp.id] = Object.keys(comp.output);
+          }
+        }
+      }
+      else{    
+        sources.forEach((s) =&gt; {
+          let temp = this.dataSourceProperties(comp.src[s].id);
+          Object.keys(temp).forEach((id) =&gt; {
+            result[id] = temp[id];
+          });
+        });
+      }
+      return result;
+    };
+    
+	},
+	destroy: function() {
+    
+	},
+  update: function() {
+    if (this.src.views &amp;&amp; this.src.views.output)
+      this.output = {
+        connectivity: this.connectivity()
+      };
+
+      //this.output = {connectivity: this.connectivity(), sharedProperties: this.sharedProperties()};
+      //console.log(this.output);
+    
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="Ka9iw8Fn" name="Data Observer Data"><pre data-type="content" type="application/json" id="vistributeDataObserver-data" class="visdata">{
+  "config": {
+    "src": {"views": "vistributeViewObserver"}
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="kijiexUY" name="Device Observer" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeDeviceObserver" class="viscontroller">vc = {
+  data: 'vistributeDeviceObserver-data',
+  libs: ['https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/1.8.0/fingerprint2.min.js'],
+	init: function() {
+    
+    this.getDeviceDataFromStorage = () =&gt; {
+      let deviceData;
+      try {
+        deviceData = JSON.parse(localStorage.getItem('vistributeDeviceData'));
+      } catch (e) { console.warn(e); }
+      if (!deviceData)
+        this.updateFingerprint();
+      else {
+        this.updateDataParagraph(deviceData);
+      }
+    };
+    
+    this.storeDeviceData = (deviceData) =&gt; {
+      try {
+        localStorage.setItem('vistributeDeviceData', JSON.stringify(deviceData));
+      } catch (e) { console.warn(e); }
+    };
+    
+    this.updateDataParagraph = (deviceData) =&gt; {
+      let data = this.data;
+      if (data[deviceData.id]) {
+        let d = data[deviceData.id];
+        if (!d.clients.includes(webstrate.clientId)) {
+          d.clients.push(webstrate.clientId);
+
+          let formerClientId = this.getFormerClientId();
+          delete d.former_clients_map[formerClientId];
+          d.former_clients_map[webstrate.clientId] = formerClientId;
+
+          delete d.sessionIds[formerClientId];
+          d.sessionIds[webstrate.clientId] = this.getSessionId();
+        }
+      } else {
+        deviceData.clients = [webstrate.clientId];
+        deviceData.client_resolutions = {};
+        
+        deviceData.former_clients_map = {};
+        deviceData.former_clients_map[webstrate.clientId] = this.getFormerClientId();
+        
+        deviceData.sessionIds = {};
+        deviceData.sessionIds[webstrate.clientId] = this.getSessionId();
+        
+        data[deviceData.id] = deviceData;
+      }
+      data[deviceData.id].client_resolutions[webstrate.clientId] = {
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+      this.cleanUpData(data);
+      this.data = data;
+    };
+    
+    this.getSessionId = () =&gt; {
+      let sessionId;
+      try {
+        sessionId = JSON.parse(sessionStorage.getItem('vistributeSessionId'));
+      } catch (e) { console.warn(e); }
+      
+      try {
+        if (!sessionId)
+          sessionStorage.setItem('vistributeSessionId', JSON.stringify(webstrate.clientId));
+        
+      } catch (e) { console.warn(e); }
+      
+      return sessionId ? sessionId : webstrate.clientId;
+    };
+    
+    this.getFormerClientId = () =&gt; {
+      let formerClientId;
+      try {
+        formerClientId = JSON.parse(sessionStorage.getItem('vistributeFormerClientId'));
+      } catch (e) { console.warn(e); }
+      
+      try {
+        sessionStorage.setItem('vistributeFormerClientId', JSON.stringify(webstrate.clientId));
+        
+      } catch (e) { console.warn(e); }
+      
+      return formerClientId;
+    };
+    
+    this.cleanUpData = (data) =&gt; {
+      for (let deviceId in data) {
+        let device = data[deviceId];
+        for (let i = device.clients.length - 1; i &gt;= 0; i--) {
+          let cId = device.clients[i];
+          if (!webstrate.clients.includes(cId)) {
+            device.clients.splice(i, 1);
+            delete device.client_resolutions[cId];
+          }
+        }
+        if (device.clients.length === 0) {
+          delete data[device.id];
+        }
+      }
+    };
+    
+    this.updateFingerprint = () =&gt; {
+      new Fingerprint2({
+        excludeScreenResolution: true,
+        excludeAvailableScreenResolution: true
+      }).get((hash, components) =&gt; {
+        let d = {
+          id: 'D-' + Codestrate.util.randomString(),
+          fingerprintId: hash
+        };
+        for (let i in components) {
+          if (this.config.fingerprinting.skippedFeaturesForStorage.includes(components[i].key))
+            continue;
+          d[components[i].key] = components[i].value;
+        }
+
+        // Identify device type
+        let ua = d.user_agent;
+        let deviceType = "Unknown";
+        let deviceClass = "desktop";
+        if (ua.indexOf("iPad") != -1) {
+          deviceClass = "tablet";
+          deviceType = "iPad";
+        } else if (ua.indexOf("iPhone") != -1) {
+          deviceClass = "phone";
+          deviceType = "iPhone";
+        } else if (ua.indexOf("Android") != -1) {
+          if (ua.indexOf("Mobile") != -1) {
+            deviceClass = "phone";
+            deviceType = "Android phone";
+          } else {
+            deviceClass = "tablet";
+            deviceType = "Android tablet";
+          }
+        } else if (ua.indexOf("Windows") != -1)
+          deviceType = "Windows PC";
+        else if (ua.indexOf("Mac") != -1)
+          deviceType = "Mac";
+        else if (ua.indexOf("Linux") != -1)
+          deviceType = "Linux PC";
+        d.type = deviceType;
+        d.class = deviceClass;
+
+        this.storeDeviceData(d);
+        this.updateDataParagraph(d);
+      });
+    };
+    
+    this.onCodestrateLoaded = () =&gt; {
+      if (!this.silentObserver) {      
+        setTimeout(() =&gt; {
+          this.getDeviceDataFromStorage();
+        }, Math.random() * 1000);
+      }
+      webstrate.on("clientPart", (cId) =&gt; {
+        let clients = webstrate.clients.slice(0);
+        clients.sort();
+        if (clients[0] === webstrate.clientId) {
+          let data = this.data;
+          this.cleanUpData(data);
+          this.data = data;
+        }
+      });
+    };
+    window.addEventListener("codestrateloaded", this.onCodestrateLoaded);
+    
+    this.onResize = () =&gt; {
+      if (this.silentObserver)
+        return;
+      
+      if (!this.resizeTimeout) {
+        this.resizeTimeout = setTimeout(() =&gt; {
+          this.resizeTimeout = undefined;
+          let data = this.data;
+          let deviceData;
+          try {
+            deviceData = JSON.parse(localStorage.getItem('vistributeDeviceData'));
+          } catch (e) { console.warn(e); }
+          if (deviceData) {
+            data[deviceData.id].client_resolutions[webstrate.clientId] = {
+              width: window.innerWidth,
+              height: window.innerHeight
+            };
+            this.data = data;
+          }
+        }, 1000);
+      }
+    };
+    
+    window.addEventListener("resize", this.onResize, false);
+    
+    let urlParams = new URLSearchParams(window.location.search);
+    this.silentObserver = urlParams.has('silentObserver');
+	},
+	destroy: function() {
+    window.removeEventListener("codestrateloaded", this.onCodestrateLoaded);
+	},
+  update: function(source) {
+    if (source === "ownData" || this.silentObserver) {
+      this.output = this.data;
+    }
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="fcBeqc9V" name="Device Observer Data"><pre data-type="content" type="application/json" id="vistributeDeviceObserver-data" class="visdata">{
+  "config": {
+    "fingerprinting": {
+      "skippedFeaturesForStorage": [
+        "canvas",
+        "webgl",
+        "regular_plugins",
+        "js_fonts"
+      ]
+    }
+  },
+  "data": {
+    "D-9xFWXJen": {
+      "id": "D-9xFWXJen",
+      "fingerprintId": "8e6dbd600096bd00c96107e5f37eabd9",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36",
+      "language": "en-US",
+      "color_depth": 24,
+      "device_memory": 8,
+      "hardware_concurrency": 4,
+      "timezone_offset": -60,
+      "session_storage": 1,
+      "local_storage": 1,
+      "indexed_db": 1,
+      "open_database": 1,
+      "cpu_class": "unknown",
+      "navigator_platform": "Win32",
+      "webgl_vendor": "Google Inc.~ANGLE (Intel(R) HD Graphics 620 Direct3D11 vs_5_0 ps_5_0)",
+      "adblock": false,
+      "has_lied_languages": false,
+      "has_lied_resolution": false,
+      "has_lied_os": false,
+      "has_lied_browser": false,
+      "touch_support": [
+        0,
+        false,
+        false
+      ],
+      "type": "Windows PC",
+      "class": "desktop",
+      "clients": [
+        "b4MZTA-lQ"
+      ],
+      "client_resolutions": {
+        "b4MZTA-lQ": {
+          "width": 1920,
+          "height": 1057
+        }
+      },
+      "former_clients_map": {
+        "b4MZTA-lQ": "GIIyKq8i_"
+      },
+      "sessionIds": {
+        "b4MZTA-lQ": "TSzk7UQvB"
+      }
+    }
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="SWpfGWfE" name="Distribution Manager" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeDistributionManager" class="viscontroller">vc = {
+	data: 'vistributeDistributionManager-data',
+	src: ["views", "dataflow", "devices", "control"],
+	init: function() {
+       
+    let urlParams = new URLSearchParams(window.location.search);
+    this.silentObserver = urlParams.has('silentObserver');
+    
+    this.distribution = {};
+    
+    this.calculateDistribution = () =&gt; {
+      let views = this.preProcessViews();
+      let constraints = Object.assign({}, this.src.control.output.constraints);
+      let viewGroups = this.identifyViewGroups(views, 7);
+      let surfaces = this.preProcesSurfaces();
+      this.preProcessConnectivity(views, constraints, surfaces, viewGroups);
+      this.distribution = {};
+      
+      if (this.silentObserver &amp;&amp; this.data &amp;&amp; this.data.clientOnDuty &amp;&amp; this.data.clientOnDuty !== webstrate.clientId) {
+        let data = this.data;
+        data.clientOnDuty = webstrate.clientId;
+        this.data = data;
+      }
+      
+      if (this.data &amp;&amp; this.data.clientOnDuty &amp;&amp; this.data.clientOnDuty !== webstrate.clientId &amp;&amp; webstrate.clients.indexOf(this.data.clientOnDuty) &gt;= 0) {
+        return;
+      } else if (webstrate.clients.indexOf(this.data.clientOnDuty) &lt; 0) {
+        let currentClients = webstrate.clients.slice(0);
+        currentClients.sort();
+        if (currentClients[0] === webstrate.clientId)
+          this.updateClientOnDuty();
+        return;
+      }
+      
+      if (this.src.control.output.mode === "manual") {
+        let manualDistr = this.src.control.output.manualDistribution;
+        for (let sId in manualDistr) {
+          if (surfaces[sId])
+            this.distribution[sId] = manualDistr[sId];
+        }
+      } else {
+      
+        if (Object.keys(surfaces).length &gt; 0 &amp;&amp; Object.keys(views).length &gt; 0) {
+          this.assignViewsToSurfaces(views, viewGroups, surfaces, constraints);
+          this.calculateLocalLayouts(views, viewGroups, surfaces);
+        }
+      }
+      
+      console.info("Updated distribution", this.distribution);
+      this.output = {
+        distribution: this.distribution,
+        surfaces: surfaces,
+        views: views,
+        timestamp: Date.now(),
+        mode: this.src.control.output.mode
+      };
+		};
+    
+    this.getFriendlyName = (cId, device) =&gt; {
+      let fullClient = Codestrate.clients.find((c) =&gt; c.id === cId);
+      let name = "";
+      if (fullClient.displayName)
+        name += fullClient.displayName + "'s ";
+      name += device.type + " ";
+      name += "(" + device.sessionIds[cId].substr(device.sessionIds[cId].length - 3) + ")";
+      return name;
+    };
+    
+    this.preProcessViews = () =&gt; {
+      let views = this.src.views.output.views;
+      let filteredViews = {};
+      
+      let constraints = this.src.control.output.constraints;
+      let sumDataPoints = 0;
+      for (let viewId in views) {
+        if (!constraints.ignoredViews.includes(viewId)) {
+          /* Deep copy is required, as we will extend the view object with
+          additional properties. However, these additions would prevent the
+          View Observer to detect changed views.
+          */
+          let v = Object.assign({}, views[viewId]);
+          // set space requirement; for visualizations only
+          if (v.hasSvg) {            
+            /* We adjust the space req via log 2 in order to dampen the
+            influence of large data points
+            */
+            v.spaceReq = v.dataPoints &gt; 1 ? Math.log2(v.dataPoints) : 1;
+            v.aspectRatio = v.size.width / v.size.height;
+          }
+          filteredViews[viewId] = v;
+        }
+      }
+      
+      return filteredViews;
+    };
+    
+    /** Identifying groups based on dataflow **/
+    this.preProcessConnectivity = (views, constraints, surfaces, viewGroups) =&gt; {
+      let connectivity = this.src.dataflow.output.connectivity;
+      let availMobile;
+      for (let sId in surfaces) {
+        if (surfaces[sId].class === "tablet" || surfaces[sId].class === "phone") {
+          availMobile = sId;
+          break;
+        }
+      }
+      for (let con in connectivity) {
+        if (connectivity[con] === "exclusive") {
+          let srcV = views[con.split(":")[0]];
+          if (!srcV)
+            continue;
+          /*if (!srcV.hasSvg &amp;&amp; availMobile)
+            constraints.forcedAssignment[srcV.id] = availMobile;*/
+          //else {
+            let recV = views[con.split(":")[1]];
+            if (srcV.group !== undefined) {
+              recV.group = srcV.group;
+              viewGroups[srcV.group].add(recV.id);
+            } else if (recV.group !== undefined) {
+              srcV.group = recV.group;
+              viewGroups[recV.group].add(srcV.id);
+            } else {
+              let i = viewGroups.push(new Set([srcV.id, recV.id]));
+              srcV.group = i - 1;
+              recV.group = i - 1;
+            }
+          //}
+        }
+      }
+    };
+    
+    /** Identifying strong groups based on visual similarity **/
+    this.identifyViewGroups = (views, threshold) =&gt; {
+      let groups = [];
+      let visualSimilarity = this.src.views.output.visualSimilarity;
+      let constraints = this.src.control.output.constraints;
+      
+      for (let group of constraints.forcedGroups) {
+        let index = groups.push(new Set(group)) - 1;
+        for (let vId of group)
+          views[vId].group = index;
+      }
+      
+      for (let viewOneId in views) {
+        for (let viewTwoId in views) {
+          if (viewOneId === viewTwoId)
+            continue;
+          
+          if (visualSimilarity[viewOneId + ":" + viewTwoId] &gt;= threshold) {
+            if (views[viewOneId].group !== undefined) {
+              groups[views[viewOneId].group].add(viewTwoId);
+              views[viewTwoId].group = views[viewOneId].group;
+            } else if (views[viewTwoId].group !== undefined) {
+              groups[views[viewTwoId].group].add(viewOneId);
+              views[viewOneId].group = views[viewTwoId].group;
+            } else {
+              let index = groups.push(new Set([viewOneId, viewTwoId])) - 1;
+              views[viewOneId].group = index;
+              views[viewTwoId].group = index;
+            }
+          }
+        }
+      }
+      
+      return groups;
+    };
+    
+    this.preProcesSurfaces = () =&gt; {
+      let devices = this.src.devices.output;
+      let constraints = this.src.control.output.constraints;
+      let surfaces = {};
+      
+      let sumArea = 0;
+      for (let d in devices) {
+        if (constraints.ignoredDevices.includes(d))
+          continue;
+        
+        for (let cId of devices[d].clients) {
+          if (constraints.ignoredClients.includes(cId))
+            continue;
+          
+          let device = devices[d];
+          let surface = {
+            id: 's-' + device.sessionIds[cId],
+            friendlyName: this.getFriendlyName(cId, device),
+            deviceId: d,
+            resolution: device.client_resolutions[cId],
+            area: device.client_resolutions[cId].width * device.client_resolutions[cId].height,
+            aspectRatio: device.client_resolutions[cId].width / device.client_resolutions[cId].height,
+            class: device.class,
+            clientMap: {}
+          };
+          surface.clientMap[cId] = {
+            x: 0,
+            y: 0,
+            width: device.client_resolutions[cId].width,
+            height: device.client_resolutions[cId].height
+          };
+          surfaces[surface.id] = surface;
+          sumArea += surface.area;
+        }
+      }
+      
+      for (let sId in surfaces) {
+        let s = surfaces[sId];
+        s.relArea = s.area / sumArea;
+      }
+      
+      return surfaces;
+    };
+    
+    this.assignViewsToSurfaces = (views, viewGroups, surfaces, constraints) =&gt; {
+      let sortedSurfaces = [];
+      for (let sId in surfaces) {
+        this.distribution[sId] = {};
+        if (sortedSurfaces.length === 0)
+          sortedSurfaces.push(sId);
+        else {
+          for (let index in sortedSurfaces) {
+            let otherS = surfaces[sortedSurfaces[index]];
+            if (surfaces[sId].relArea &gt; otherS.relArea) {
+              sortedSurfaces.splice(index, 0, sId);
+              break;
+            } else if (parseInt(index) === sortedSurfaces.length - 1)
+              sortedSurfaces.push(sId);
+          }
+        }
+      }
+        
+      let assignedViews = [];
+      
+      
+      if (Object.keys(surfaces).length === 1 &amp;&amp; false) {
+        for (let viewId in views){
+          this.distribution[Object.keys(surfaces)[0]][viewId] = {};
+          assignedViews.push(viewId);
+        }
+      } else {
+        let totalSurArea = 0;
+        for (let sId in surfaces) {
+          let res = surfaces[sId].resolution;
+          totalSurArea += res.width * res.height;
+        }
+        
+        // Calculate relative space req for non-visualization components
+        let staticSpaceReq = 0;
+        let totalVisSpaceReq = 0;
+        for (let vId in views) {
+          if (!views[vId].hasSvg) {
+            let area = views[vId].size.width * views[vId].size.height;
+            views[vId].relSpaceReq = area / totalSurArea;
+            staticSpaceReq += views[vId].relSpaceReq;
+          } else {
+            totalVisSpaceReq += views[vId].spaceReq ? views[vId].spaceReq : 0;
+          }
+        }
+        
+        let sortedViews = [];
+        // Calc relative space req for all visualizations
+        for (let vId in views) {
+          if (views[vId].hasSvg) {
+            views[vId].relSpaceReq = (views[vId].spaceReq / totalVisSpaceReq) * (1 - staticSpaceReq);
+          }
+          if (sortedViews.length === 0)
+            sortedViews.push(vId);
+          else {
+            for (let index in sortedViews) {
+              let otherV = views[sortedViews[index]];
+              if (views[vId].relSpaceReq &gt; otherV.relSpaceReq) {
+                sortedViews.splice(index, 0, vId);
+                break;
+              } else if (parseInt(index) === sortedViews.length - 1)
+                sortedViews.push(vId);
+            }
+          }
+        }
+        
+        let totalSpaceReq = 0;
+        for (let vId in views) {
+          totalSpaceReq += views[vId].relSpaceReq;
+        }
+        
+        for (let vId in constraints.forcedAssignment) {
+          let sId = constraints.forcedAssignment[vId];
+          if (surfaces[sId]) {
+            this.distribution[sId][vId] = {};
+            assignedViews.push(vId);
+            if (this.src.control.output.mode !== "manual" &amp;&amp; views[vId].group !== undefined) {
+              for (let groupVId of viewGroups[views[vId].group]) {
+                this.distribution[sId][groupVId] = {};
+                assignedViews.push(groupVId);
+              }
+            }
+          }
+        }
+        
+        
+        let sortedGroups = [];
+        for (let group of viewGroups) {
+          if (sortedGroups.length === 0)
+            sortedGroups.push(group);
+          else {
+            let spaceReq = 0;
+            for (let vId of group)
+              spaceReq += views[vId].relSpaceReq;
+            for (let index in sortedGroups) {
+              let otherG = sortedGroups[index];
+              let otherSpaceReq = 0;
+              for (let vId of otherG)
+                otherSpaceReq += views[vId].relSpaceReq;
+              if (spaceReq &gt; otherSpaceReq) {
+                sortedGroups.splice(index, 0, group);
+                break;
+              } else if (parseInt(index) === sortedGroups.length - 1)
+                sortedGroups.push(group);
+            }
+          }
+        }
+        
+        for (let group of sortedGroups) {
+          if (assignedViews.includes(Array.from(group)[0]))
+            continue;
+
+          let spaceReq = 0;
+          for (let vId of group)
+            spaceReq += views[vId].relSpaceReq;
+          
+          let sortedGroupViews = Array.from(group).sort((oneId, twoId) =&gt; {
+            if (views[oneId].relSpaceReq &gt; views[twoId].relSpaceReq)
+              return -1;
+            else if (views[oneId].relSpaceReq &lt; views[twoId].relSpaceReq)
+              return 1;
+            else
+              return 0;
+          });
+          
+          // try to find a surfaces that matches the group's space requirement
+          let bestSId;
+          let diffSpace;
+          for (let sId of sortedSurfaces) {
+            let newDiff;
+            if (this.availSpace(surfaces[sId], views) &gt; spaceReq)
+              newDiff = this.availSpace(surfaces[sId], views) - spaceReq;
+            else
+              newDiff = Math.abs(this.availSpace(surfaces[sId], views) - spaceReq) * 2;
+            
+            if (diffSpace === undefined) {
+              diffSpace = newDiff;
+              bestSId = sId;
+            } else if (newDiff &lt; diffSpace) {
+              diffSpace = newDiff;
+              bestSId = sId;
+            }
+          }
+          
+          // we determin that the diff should be smaller than 10 percent of the space req
+          if (bestSId &amp;&amp; diffSpace &lt; spaceReq * 0.1) {
+            for (let vId of sortedGroupViews){
+              this.distribution[bestSId][vId] = {};
+              assignedViews.push(vId);
+            }
+            
+            continue;
+          }
+          
+          // if no best fit exists, look for any surface that can carry the group
+          for (let sId of sortedSurfaces) {
+            if (this.availSpace(surfaces[sId], views) &gt;= spaceReq) {
+              for (let vId of sortedGroupViews) {
+                if (!assignedViews.includes(vId)){
+                  this.distribution[sId][vId] = {};
+                  assignedViews.push(vId);
+                }
+              }
+              break;
+            }
+          }
+          
+          // Fallback: If no surface applicible, take the closest one.
+          // Todo: this is maybe not the best behaviour!
+          for (let vId of group) {
+            if (!assignedViews.includes(vId)){
+              this.distribution[bestSId][vId] = {};
+              assignedViews.push(vId);
+            }
+          }
+          
+        }
+        
+        for (let vId of sortedViews) {
+          if (views[vId].group !== undefined || assignedViews.includes(vId))
+            continue;
+          
+          for (let sId of sortedSurfaces) {
+            if(this.availSpace(surfaces[sId], views) &gt;= views[vId].relSpaceReq) {
+              this.distribution[sId][vId] = {};
+              assignedViews.push(vId);
+              break;
+            }
+          }
+        }
+        
+        for (let vId of sortedViews) {
+          if (assignedViews.includes(vId))
+            continue;
+
+          let maxAvailSpace;
+          let maxSId;
+          
+          for (let sId of sortedSurfaces)  {
+            if (maxAvailSpace === undefined || this.availSpace(surfaces[sId], views) &gt; maxAvailSpace) {
+              maxAvailSpace = this.availSpace(surfaces[sId], views);
+              maxSId = sId;
+            }
+          }
+          this.distribution[maxSId][vId] = {};
+          assignedViews.push(vId);
+        }
+      }
+    };
+    
+    this.availSpace = (surface, views) =&gt; {
+      let availSpace = surface.relArea;
+      for (let vId in this.distribution[surface.id])
+        availSpace -= views[vId].relSpaceReq;
+      
+      return availSpace;
+    };
+    
+    this.getColWidth = (col, views) =&gt; {
+        if (typeof col === "string")
+          return views[col].localSize.width;
+        else {
+          let max = 0;
+          for (let subCol of col) {
+            max = Math.max(this.getRowWidth(subCol, views), max);
+          }
+          return max;
+        }
+      };
+    
+    this.getColHeight = (col, views) =&gt; {
+        if (typeof col === "string")
+          return views[col].localSize.height;
+        else {
+          let sum = 0;
+          for (let subCol of col) {
+            sum += this.getRowHeight(subCol, views);
+          }
+          return sum;
+        }
+      };
+    
+    this.getColAspectRatio = (col, views) =&gt; {
+      return this.getColWidth(col, views) / this.getColHeight(col, views);
+    };
+    
+    this.getRowWidth = (col, views) =&gt; {
+        if (typeof col === "string")
+          return views[col].localSize.width;
+        else {
+          let sum = 0;
+          for (let elem of col) {
+            sum += this.getColWidth(elem, views);
+          }
+          return sum;
+        }
+      };
+    
+    this.getRowHeight = (col, views) =&gt; {
+        if (typeof col === "string")
+          return views[col].localSize.height;
+        else {
+          let max = 0;
+          for (let elem of col) {
+            max = Math.max(this.getColHeight(elem, views), max);
+          }
+          return max;
+        }
+      };
+    
+    this.cleanStr = (str) =&gt; {
+      return str.replace(/[^a-zA-Z]/g, "");
+    };
+    
+    this.getGroupWidth = (g, views) =&gt; {
+      let w = 0;
+      for (let vId of g)
+        w += views[vId].localSize.width;
+      return w;
+    };
+    
+    this.getGroupHeight = (g, views) =&gt; {
+      let w = 0;
+      for (let vId of g)
+        w += views[vId].localSize.width;
+      return w;
+    };
+    
+    this.addToRow = (col, row, v, viewGroups) =&gt; {
+      let ids = [v.id];
+      if (typeof row === "string") {
+        col[col.indexOf(row)] = [row, v.id];
+        row = col[col.indexOf(row)];
+      } else {
+        row.push(v.id);
+      }
+      return ids;
+    };
+    
+    this.calculateLocalLayouts = (views, viewGroups, surfaces) =&gt; {
+      
+      for (let sId in this.distribution) {
+        let s = surfaces[sId];
+        let cols = [];
+        
+        // TODO: Sort views by width first to avoid mini columns
+        for (let vId in this.distribution[sId]) {
+          let v = views[vId];
+          let targetRatio = v.relSpaceReq / s.relArea;
+          let relArea = (v.size.width * v.size.height) / s.area;
+          let scale = Math.sqrt(targetRatio / relArea);
+          v.localSize = {width: v.size.width * scale, height: v.size.height * scale};
+        }
+        
+        let assignedViews = [];
+        let groupStartCol = {};
+        let groupStartElem = {};
+
+        for (let vId in this.distribution[sId]) {
+          let v = views[vId];
+          if (cols.length === 0) {
+            cols.push([vId]);
+            assignedViews.push(vId);
+                      
+            if (v.group !== undefined &amp;&amp; !groupStartCol[v.group])
+              groupStartCol[v.group] = 0;
+            if (v.group !== undefined &amp;&amp; !groupStartElem[v.group])
+              groupStartElem[v.group] = 0;
+            
+            continue;
+          }
+          
+          // Assign columns
+          let lastCol = cols[cols.length - 1];
+          let lastElem = lastCol[lastCol.length - 1];
+          
+          let added = false;
+          
+
+          
+          for (let index in cols) {
+            if (v.group !== undefined &amp;&amp; groupStartCol[v.group] &amp;&amp; groupStartCol[v.group] &gt; index)
+              continue;
+
+            let col = cols[index];
+            let lastViewStanding = assignedViews.length === Object.keys(this.distribution[sId]).length - 1 &amp;&amp; parseInt(index) === cols.length - 1;
+            for (let elem of col) {
+              if (v.group !== undefined &amp;&amp; groupStartElem[v.group] &amp;&amp; groupStartElem[v.group] &gt; col.indexOf(elem))
+                continue;
+              let tolerance = 0.35;
+              if (((this.getRowHeight(elem, views) &lt;= v.localSize.height * (1 + tolerance) || lastViewStanding) &amp;&amp; this.getRowHeight(elem, views) &gt;= v.localSize.height * (1 - tolerance)) || this.getRowHeight(elem, views) &gt;= v.localSize.height) {
+                let localScale = 1;
+                if (this.getRowHeight(elem, views) &lt;= v.localSize.height * (1 + tolerance))
+                  localScale = this.getRowHeight(elem, views) / v.localSize.height;
+                else
+                  localScale = (this.getRowHeight(elem, views) * 0.5) / v.localSize.height;
+                let alignedSize = {width: v.localSize.width * localScale, height: v.localSize.height * localScale};
+                if (this.getRowWidth(elem, views) + alignedSize.width &lt;= this.getColWidth(col, views) &amp;&amp; !assignedViews.includes(vId)) {                
+                  v.localSize = alignedSize;
+                  assignedViews = assignedViews.concat(this.addToRow(col, elem, v, viewGroups));
+                  //groupStartElem[v.group] = col.indexOf(elem);
+                }
+              }
+            }
+          }
+          
+          if (!assignedViews.includes(vId)) {
+            let bestCol;
+            let bestRatio;
+            for (let index in cols) {
+              let col = cols[index];
+              if (this.getColWidth(col, views) &lt;= v.localSize.width * (1 - 0.1))
+                continue;
+              
+              let ratio = (this.getColHeight(col, views) + v.localSize.height) / s.resolution.height;
+              if (this.getColHeight(col, views) + v.localSize.height &lt; s.resolution.height){
+                ratio = Math.abs(1 - this.getColWidth(col, views) / v.localSize.width);
+                if ((bestCol &amp;&amp; ratio &lt; bestRatio) || !bestCol) {
+                  bestCol = col;
+                  bestRatio = ratio;
+                }
+                break;
+              }
+              if (ratio &lt; (this.getRowWidth(cols, views) + v.localSize.width) / s.resolution.width) {
+                if ((bestCol &amp;&amp; ratio &lt; bestRatio) || !bestCol) {
+                  bestCol = col;
+                  bestRatio = ratio;
+                }
+              }
+            }
+            if (bestCol) {
+              bestCol.push(vId);
+              lastCol = bestCol;
+              assignedViews.push(vId);
+            }
+          }
+          
+          if (!assignedViews.includes(vId)) {
+            if (cols.length === 1 &amp;&amp; this.getColHeight(lastCol, views) + v.size.height &gt; s.resolution.height) {
+              cols.push([vId]);
+              lastCol = cols[cols.length - 1];
+              assignedViews.push(vId);
+            } else if (cols.length &gt; 1 &amp;&amp; this.getRowHeight(cols, views) &lt;= v.size.height + this.getColHeight(lastCol, views)) {
+              cols.push([vId]);
+              lastCol = cols[cols.length - 1];
+              assignedViews.push(vId);
+            } else {
+              lastCol.push(vId);
+              assignedViews.push(vId);
+            }
+          }
+          
+          if (v.group !== undefined)
+            if (groupStartCol[v.group] === undefined || cols.indexOf(lastCol) &lt; groupStartCol[v.group])
+              groupStartCol[v.group] = cols.indexOf(lastCol);
+          if (v.group !== undefined)
+            if (groupStartElem[v.group] === undefined || lastCol.indexOf(v.id) &lt; groupStartElem[v.group])
+            groupStartElem[v.group] = lastCol.indexOf(v.id);
+        }
+        
+        let xScale = this.getRowWidth(cols, views) / s.resolution.width;
+        let yScale = this.getRowHeight(cols, views) / s.resolution.height;
+        let scale = Math.max(xScale, yScale);
+        
+        for (let vId in this.distribution[sId]) {
+          views[vId].localSize = {
+            width: views[vId].localSize.width / scale,
+            height: views[vId].localSize.height / scale};
+        }
+        
+        let optimizeWidth = () =&gt; {
+          for (let i in cols) {
+            let col = cols[i];
+            for (let j in col) {
+
+              let maxWidth = this.getColWidth(col, views);
+              if (this.getRowWidth(cols, views) &lt; s.resolution.width) {
+                maxWidth = (s.resolution.width - this.getRowWidth(cols, views)) + this.getColWidth(col, views);
+              }
+              let row = col[j];
+              if (this.getRowWidth(row, views) &lt; this.getColWidth(col, views) || (cols.length === 1 &amp;&amp; this.getRowWidth(row, views) &lt; s.resolution.width)) {
+                let rowH = this.getRowHeight(row, views);
+                let scale = this.getColWidth(col, views) / this.getRowWidth(row, views);
+                if (Math.abs(1 - scale) &lt;= 0.5) {
+                  let scaledColH = this.getColHeight(col, views) - rowH + rowH * scale;
+                  if (scaledColH &lt; s.resolution.height) {
+                    if (typeof row === "string")
+                      views[row].localSize = {
+                        width: views[row].localSize.width * scale,
+                        height: views[row].localSize.height * scale
+                      };                  
+                    else {
+                      for (let vId of row) {                   
+                        views[vId].localSize = {
+                          width: views[vId].localSize.width * scale,
+                          height: views[vId].localSize.height * scale
+                        };
+                      }
+                    }
+                  }
+                }
+                if (typeof row === "string") {
+                  let localMaxWidth = Math.max(this.getColWidth(col, views), maxWidth);
+                  views[row].localSize = {
+                    width: Math.min(views[row].localSize.width * 1.5, localMaxWidth),
+                    height: views[row].localSize.height
+                  };                  
+                } else {
+                  for (let vId of row) {
+                    let diff = this.getColWidth(col, views) - this.getRowWidth(row, views);
+                    let localMaxWidth = views[vId].localSize.width + diff;
+                    views[vId].localSize = {
+                      width: Math.min(views[vId].localSize.width * 1.5, localMaxWidth),
+                      height: views[vId].localSize.height
+                    };
+                  }
+                }
+
+              }
+            } 
+          }
+        };
+        
+        let optimizeHeight = () =&gt; {
+          for (let i in cols) {
+          let col = cols[i];
+          let maxHeight = this.getRowHeight(cols, views);
+          for (let j in col) {
+            let row = col[j];
+            maxHeight = (s.resolution.height - this.getColHeight(col, views)) + this.getRowHeight(row, views);
+            //console.log(maxHeight, row);
+            maxHeight = s.resolution.height;
+            if (typeof row === "string") {              
+              if (this.getColHeight(col, views) &gt;= maxHeight)
+                continue;
+              
+              let v = views[row];
+              let curRatio = v.localSize.width / v.localSize.height;
+              let newHeight = (maxHeight - this.getColHeight(col, views) + v.localSize.height);
+              let newRatio = v.localSize.width / newHeight;
+              let maxScale = 1.5;
+              if (col.length &gt; 1 &amp;&amp; col.indexOf(row) &lt; col.length - 1) {
+                maxScale = Math.min(maxHeight / this.getColHeight(col, views), maxScale);
+                maxScale = ((maxScale - 1) / (col.length - 1)) + 1;
+              }
+              if (Math.abs(curRatio - newRatio) &lt;= curRatio * Math.abs(1 - maxScale))
+                views[row].localSize = {
+                    width: views[row].localSize.width,
+                    height: newHeight
+                  };
+              else {
+                views[row].localSize = {
+                    width: views[row].localSize.width,
+                    height: Math.min(views[row].localSize.height * maxScale, maxHeight)
+                  };
+              }
+            } else {
+              for (let vId of row) {
+                let v = views[vId];                  
+                let curRatio = v.localSize.width / v.localSize.height;                
+                let newHeight = (maxHeight - this.getColHeight(col, views) + v.localSize.height);
+                newHeight = Math.max(newHeight, this.getRowHeight(row, views));
+                if (!v.hasSvg)
+                  newHeight = this.getRowHeight(row, views);
+                let newRatio = v.localSize.width / newHeight;
+                if (Math.abs(curRatio - newRatio) &lt;= curRatio * 0.5) {
+                views[vId].localSize = {
+                    width: views[vId].localSize.width,
+                    height: newHeight
+                  };
+                } else {
+                  views[vId].localSize = {
+                      width: views[vId].localSize.width,
+                      height: Math.min(views[vId].localSize.height * 1.5, newHeight)
+                    };
+                }
+              }
+            }
+          } 
+        }
+        };
+        
+        optimizeWidth();
+        optimizeHeight();
+        optimizeWidth();
+        optimizeHeight();
+        
+        let curX = 0, curY = 0;
+        for (let i in cols) {
+          let col = cols[i];
+          if (s.resolution.height - this.getColHeight(col, views) !== 0)
+            curY = (s.resolution.height - this.getColHeight(col, views)) / 2;
+          else
+            curY = 0;
+          for (let elem of col) {
+            if (typeof elem === "string") {
+              this.distribution[sId][elem] = {
+                size: views[elem].localSize,
+                pos: {x: curX, y: curY}
+              };
+              curY += views[elem].localSize.height;
+            } else {
+              let subX = curX;
+              for (let subElem of elem) {
+                this.distribution[sId][subElem] = {
+                  size: views[subElem].localSize,
+                  pos: {x: subX, y: curY}
+                };
+                subX += views[subElem].localSize.width;
+              }
+              curY += this.getRowHeight(elem, views);
+            }
+          }
+          curX += this.getColWidth(col, views);
+        }
+        
+        /* Older code using autolayout.js
+        
+        // Generate Constraints for AutoLayout
+        let colConstraint = "|-";
+        let centerG = cols.length &gt; 1 ? "" : "~";
+        for (let i in cols) {
+          let col = cols[i];
+          let constraint = `V:|[g${i}:~(0@20)~`;
+          let lastElem;
+          for (let j in col) {
+            let elem = col[j];
+            let subConstraint = `[g${i}${j}:${this.getRowWidth(elem, views) !== this.getColWidth(col, views) ? "" : ""}`;
+            if (typeof elem === "string") {
+              subConstraint += `[${this.cleanStr(elem)}(${views[elem].localSize.width})]${this.getRowWidth(elem, views) !== this.getColWidth(col, views) ? "" : ""}]`;
+              lastElem = elem;              
+            } else {
+              for (let h in elem) {
+                let subElem = elem[h];
+                subConstraint += `[${this.cleanStr(subElem)}(${views[subElem].localSize.width})]`;
+              }
+              subConstraint = subConstraint.slice(0, -1);
+              subConstraint += `${this.getRowWidth(elem, views) !== this.getColWidth(col, views) ? "-" : ""}]`;
+              lastElem = elem;
+            }
+            constraint += `[g${i}${j}]-`;
+            layoutConstraints.push(subConstraint);
+          }
+          constraint = constraint.slice(0, -1);
+          constraint += "~(0@20)~]|";
+          layoutConstraints.push(constraint);
+          colConstraint += `[g${i}]-`;
+        }
+        colConstraint = colConstraint.slice(0, -1);
+        colConstraint += "-|";
+        layoutConstraints.push(colConstraint);
+        let m = "";
+        for (let l of layoutConstraints) {
+          m += l + "\n";
+        }
+        console.log(m);
+        
+        let AutoLayout = window.AutoLayout;
+        let view = new AutoLayout.View();
+        view.addConstraints(AutoLayout.VisualFormat.parse(layoutConstraints, {extended: true}));
+        view.setSize(s.resolution.width, s.resolution.height);
+        
+        // Sometimes the autolayout returns negative positions
+        // As compensation, we shift the whole layout
+        let minX = 0;
+        let minY = 0;
+        for (let id in view.subViews) {
+          minX = Math.min(view.subViews[id].left, minX);
+          minY = Math.min(view.subViews[id].top, minY);
+        }
+        
+        for (let vId in this.distribution[sId]) {
+          let layoutElem = view.subViews[this.cleanStr(vId)];
+          this.distribution[sId][vId] = {
+            pos: {x: layoutElem.left - minX, y: layoutElem.top - minY},
+            size: {width: layoutElem.width, height: layoutElem.height}
+          };
+        }
+        */
+      }
+    };
+    
+    this.updateClientOnDuty = () =&gt; {
+      let devices = this.src.devices.output;
+      if (Object.keys(devices).length === 0)
+        return;
+      let strongestDevice = devices[Object.keys(devices)[0]];
+      let strongestIndex = this.calculateDevicePerformanceIndex(strongestDevice);
+      for (let dId in devices){
+        let index = this.calculateDevicePerformanceIndex(devices[dId]);
+        if (index &gt; strongestIndex) {
+          strongestDevice = devices[dId];
+          strongestIndex = index;
+        }
+      }
+      let clients = strongestDevice.clients.slice(0);
+      clients.sort();
+      this.data = {
+        clientOnDuty: clients[0]
+      };
+    };
+      
+    this.calculateDevicePerformanceIndex = (device) =&gt; {
+      let index = 0;
+      index += device.hardware_concurrency;
+      index += device.device_memory;
+      switch (device.class) {
+        case "desktop":
+          index += 20;
+          break;
+        case "tablet":
+          index += 10;
+          break;
+        case "phone":
+          index += 5;
+          break;
+      }
+      return index;
+    };
+	},
+	update: function(source) {
+		if (this.src.views &amp;&amp; this.src.views.output &amp;&amp;
+        this.src.dataflow &amp;&amp; this.src.dataflow.output &amp;&amp;
+        this.src.devices &amp;&amp; this.src.devices.output &amp;&amp;
+        this.src.control &amp;&amp; this.src.control.output){
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+      }
+      this.timeout = setTimeout(() =&gt; {
+        this.calculateDistribution();
+      }, 1000);
+    }
+	},
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="dAzjLALE" name="Distribution Manager Data"><pre data-type="content" type="application/json" id="vistributeDistributionManager-data" class="visdata">{
+  "config": {
+    "src": {
+      "views": "vistributeViewObserver",
+      "dataflow": "vistributeDataObserver",
+      "devices": "vistributeDeviceObserver",
+      "control": "vistributeControlPanel"
+    }
+  },
+  "data": {
+    "clientOnDuty": "Utg148dr4"
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="jMhv9JJD" name="Control Panel" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeControlPanel" class="viscontroller study">vc = {
+  data: 'vistributeControlPanel-data',
+  src: ['viewBoardData', 'devices', 'views', 'storage'],
+  libs: ['https://d3js.org/d3.v4.min.js'],
+  init: function() {
+    
+    this.togglePanel = () =&gt; {
+
+      let container = document.getElementById("vistributeControlPanelContainer");
+      if (!container) {
+        container = document.createElement("transient");
+        container.setAttribute("id", "vistributeControlPanelContainer");
+        document.body.appendChild(container);
+      }
+
+      if (document.body.getAttribute('transient-controlPanel') === "true") {
+        if (this.data.mode === "manual") {
+          let data = this.data;
+          data = this.updateManualDistr(data, this.src.viewBoardData.output.configuration.surfaces);
+          this.data = data;
+        }
+        
+        this.view.parent.appendChild(container.firstChild);
+        document.body.setAttribute("transient-controlPanel", false);
+        this.panel.style.display = "none";
+      } else {
+        this.updateConfiguration();
+        
+        container.appendChild(this.view.element);
+        document.body.setAttribute("transient-controlPanel", true);
+        this.panel.style.display = "block";
+      }
+    };
+
+    this.generatePanel = () =&gt; {
+      this.panel = document.createElement("div");
+      this.panel.id = "vistributeControlPanel";
+      this.view.element.appendChild(this.panel);
+      this.panel.style.display = "none";
+      
+      this.maximizedSurfacePreview = document.createElement("div");
+      this.maximizedSurfacePreview.classList.add("sur-preview");
+      this.maximizedSurfacePreview.id = "maxSurPreview";
+
+      this.interfacePreview = document.createElement("div");
+      this.interfacePreview.classList.add("panelView", "sur-preview");
+      this.interfacePreview.id = "interfacePreview";
+
+      this.constraintsPreview = document.createElement("div");
+      this.constraintsPreview.id = "constraintsPreview";
+      this.constraintsPreview.classList.add("panelView", "inactive");
+
+      this.panel.appendChild(this.maximizedSurfacePreview);
+      this.panel.appendChild(this.interfacePreview);
+      this.panel.appendChild(this.constraintsPreview);
+    };
+
+    this.generateFloatingButton = () =&gt; {
+      this.floatingQuickMenu = document.createElement("transient");
+      this.floatingQuickMenu.id = "vistributeQuickMenu";
+      document.body.appendChild(this.floatingQuickMenu);
+      let container = document.createElement("div");
+      this.floatingQuickMenu.appendChild(container);
+
+      let button = document.createElement("div");
+      button.innerHTML = '&lt;i class="material-icons"&gt;important_devices&lt;/i&gt;';
+      button.classList.add("button", "vistribution");
+      button.addEventListener("click", () =&gt; {
+        this.togglePanel();
+      });
+      
+      container.appendChild(button);
+      
+      let spinner = document.createElement("div");
+      spinner.classList.add("spinner");
+      spinner.innerHTML = "&lt;div&gt;&lt;/div&gt;&lt;div&gt;&lt;/div&gt;&lt;div&gt;&lt;/div&gt;";
+      container.appendChild(spinner);
+
+      let settingsButton = document.createElement("div");
+      settingsButton.innerHTML = '&lt;i class="material-icons"&gt;settings&lt;/i&gt;';
+      settingsButton.classList.add("button", "vistributeSettings");
+      settingsButton.addEventListener("click", () =&gt; { this.togglePanel(); });
+
+      container.appendChild(settingsButton);
+      
+      this.interfaceMinimap = document.createElement("div");
+      this.interfaceMinimap.id = "vistributeMinimap";
+      container.appendChild(this.interfaceMinimap);
+    };      
+    
+    this.updatePanel = () =&gt; {
+      let surfaces = this.src.viewBoardData.output.configuration.surfaces;
+      let distribution = this.src.viewBoardData.output.configuration.distribution;
+      let views = this.src.viewBoardData.output.configuration.views;
+      let devices = this.src.devices.output;
+      
+      this.updateInterfacePreview(surfaces, distribution, devices, views);
+      this.updateConstraintsPreview(surfaces, distribution, devices, views);
+
+      if (this.maximizedSurfacePreview.classList.contains("active")) {
+        let sId = this.maximizedSurfacePreview.firstChild.id.split(":")[1];
+        this.showMaximizedPreview(sId, surfaces, distribution, devices, views);
+      }
+      
+      this.updateMinimap(surfaces, distribution, devices, views);
+      
+    };
+    
+    this.updateManualDistr = (data, surfaces) =&gt; {
+      let container = d3.select(this.interfacePreview);
+      let surElements = container.selectAll(".surface");
+      let viewContainer = surElements.selectAll('.view');
+      let manDistr = data.manualDistribution;
+      viewContainer.each((v, idx, elems) =&gt; {
+        let elem = elems[idx];
+        let bbox = elem.getBoundingClientRect();
+        let left = parseFloat(elem.style.left.replace("px", ""));
+        let top = parseFloat(elem.style.top.replace("px", ""));
+        let sId = d3.select(elem.parentNode).data()[0];        
+        let distr = manDistr[sId][v.id];
+        
+        let surBox = elem.parentNode.getBoundingClientRect();
+        let scale = surfaces[sId].resolution.width / surBox.width;
+        
+        let pos = {x: left * scale, y: top * scale};
+        let size = {width: bbox.width * scale, height: bbox.height * scale};
+        if (!distr)
+          distr = {};
+        distr.pos = pos;
+        distr.size = size;
+        manDistr[sId][v.id] = distr;
+      });
+      data.manualDistribution = manDistr;
+      return data;
+    };
+    
+    this.updateConstraintsPreview = (surfaces, distribution, devices, views) =&gt; {
+      let descriptions = {
+        ignoredClients: "Ignored Clients / Surfaces",
+        ignoredViews: "Ignored Views",
+        forcedAssignment: "Manually Assigned Views",
+        forcedGroups: "Manually Grouped Views",
+      };
+      let defaultViews = this.src.views.output.views;
+      
+      let constraints = this.data.constraints;
+      
+      let container = d3.select(this.constraintsPreview);
+      container.selectAll("div").remove();
+      
+      let width = window.innerWidth;
+      let height = Math.max(window.innerHeight - 60 - 880, (window.innerHeight - 60) * 0.5);
+      container
+        .style("width","100%" )
+        .style("height", height + "px");
+      
+      let viewConstraints = container.append("div").attr("class", "all views");
+      let header = viewConstraints.append("div")
+        .attr("class", "views title")
+        .append("span")
+        .text("All Views");
+      let viewContainer = viewConstraints.append("div");
+      viewContainer
+        .style("width", width * 0.5 + "px")
+        .style("height", height - 40 + "px")
+        .attr("class", "view container");
+      
+      let allViews = Object.keys(views).concat(constraints.ignoredViews);
+      
+      let viewBox = viewContainer.selectAll('.view.box')
+        .data(allViews.map((vId) =&gt; {
+          let v;
+          if (views[vId])
+            v = Object.assign({}, views[vId]);
+          else
+            v = Object.assign({}, defaultViews[vId]);
+          if (defaultViews[vId])
+            v.size = defaultViews[vId].size;
+          return v;
+        }))
+        .enter().append("div")
+        .attr("class", "view box");
+      
+      let viewHeader = viewBox.append("div")
+        .attr("class", "view header");
+      
+      viewHeader.append("div").append("span")
+        .attr("class", "title")
+        .text((v) =&gt; v.friendlyName);
+      
+      let viewIndicators = viewHeader
+        .append("div")
+        .attr("class", "view indicators");
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.spaceReq ? "sr-" + Math.round(v.spaceReq) + " active" : "inactive";
+        })
+        .style("opacity", (v) =&gt; v.spaceReq / 12 + 0.1)
+        .text("bubble_chart")
+        .classed("spaceReq", true)
+        .classed("material-icons", true)
+        .attr("title", (v) =&gt; "Space Requirement: " + Math.round(v.spaceReq));
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.group !== undefined ? "g-" + v.group : "inactive";
+        })
+        .text((v) =&gt; v.group !== undefined ? "filter_" + (v.group + 1) : "")
+        .classed("group", true)
+        .classed("material-icons", true)
+        .attr("title", "View Group");
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          let sId = constraints.forcedAssignment[v.id];
+          if (sId)
+            return distribution[sId] &amp;&amp; distribution[sId][v.id] ? "manual" : "";
+          else
+            return "inactive";
+        })
+        .text("phonelink_lock")
+        .classed("assigned", true)
+        .classed("material-icons", true)
+        .classed("editable", true)
+        .attr("title", (v) =&gt; {
+          let txt = "Manually Assigned to Surface ";
+          let sId = constraints.forcedAssignment[v.id];
+          if (sId) {
+            txt += sId.slice(-3);
+            txt += surfaces[sId] ? "(" + surfaces[sId].friendlyName + ")" : " (not connected)";
+          }
+          return txt;
+        })
+        .on("click", (v, i, elems) =&gt; {
+          let data = this.data;
+           if (data.constraints.forcedAssignment[v.id]) {
+             delete data.constraints.forcedAssignment[v.id];
+             this.data = data;
+           }
+        });
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          if (this.data.mode === "manual") {
+            
+            for (let sId in distribution) {
+              if (distribution[sId][v.id] !== undefined)
+                return "manual";
+            }
+            return "";
+
+          } else
+            return this.data.constraints.ignoredViews.includes(v.id) ? "manual" : "";
+        })
+        .text((v) =&gt; {
+        if (this.data.mode === "manual") {
+            
+            for (let sId in distribution) {
+              if (distribution[sId][v.id] !== undefined)
+                return "visibility";
+            }
+            return "visibility_off";
+
+          } else
+            return this.data.constraints.ignoredViews.includes(v.id) ? "visibility_off" : "visibility";
+        })
+        .classed("material-icons", true)
+        .classed("editable", ()=&gt; this.data.mode !== "manual")
+        .attr("title", "Toggle visibility of view")
+        .on("click", (v, i, elems) =&gt; {
+          let data = this.data;
+           if (data.constraints.ignoredViews.includes(v.id)) {
+             elems[i].innerHTML = "visibility";
+             data.constraints.ignoredViews.splice(data.constraints.ignoredViews.indexOf(v.id), 1);
+           } else {
+             elems[i].innerHTML = "visibility_off";
+             data.constraints.ignoredViews.push(v.id);           
+           }
+          this.data = data;
+        });
+      
+      viewIndicators.append("span")
+        .text("expand_more")
+        .classed("material-icons", true)
+        .classed("editable", true)
+        .attr("title", "Show/hide preview")
+        .on("click", (vId, i, elems) =&gt; {
+          let box = elems[i].parentNode.parentNode.parentNode;
+          if (box.classList.contains("expanded")) {
+            box.classList.remove("expanded");
+            elems[i].innerHTML = "expand_more";
+          } else {
+            box.classList.add("expanded");
+            elems[i].innerHTML = "expand_less";
+          }
+        });
+      
+      let viewPreview = viewBox.append("div")
+        .attr("class", "viewPreview")
+        .style("width", (v) =&gt; Math.min(v.size.width, width * 0.7 - 5) + "px");
+      
+      let viewData = viewBox.data();
+      let viewNodes = viewBox.nodes();
+      for (let i = 0; i &lt; viewData.length; i++) {
+        let v = viewData[i];
+        let vNode = viewNodes[i];
+        
+        vNode.setAttribute("draggable", true);
+        vNode.addEventListener("dragstart", (e) =&gt; { 
+          e.dataTransfer.setData("id", v.id);
+          e.dataTransfer.effectAllowed = "move";
+        });
+        
+        let node = Vistrate.getOutput(v.id).view.element.firstChild.cloneNode(true);
+        let previewNode = viewNodes[i].querySelector(".viewPreview");
+        let w = parseInt(previewNode.style.width.replace("px",""));
+        let scale = w / node.getAttribute("width");
+        node.style = `transform: scale(${scale}); transform-origin: top left;`;
+        previewNode.appendChild(node);
+      }
+      
+      let surConstraints = container.append("div")
+        .attr("class", "all surfaces");
+      let surHeader = surConstraints.append("div")
+        .attr("class", "surface title")
+        .append("span")
+        .text("All Surfaces");
+      let surContainer = surConstraints.append("div");
+      surContainer
+        .style("width", width * 0.28 + "px")
+        .style("height", height - 40 + "px")
+        .attr("class", "surface container");
+      
+      let clients = constraints.ignoredClients.slice(0);
+      for (let cId of webstrate.clients) {
+        if (!clients.includes(cId))
+          clients.push(cId);
+      }
+      
+      let getDeviceIcon = (type) =&gt; {
+        let deviceIcon;
+        if (type === "iPhone")
+          deviceIcon = "phone_iphone";
+        else if (type === "iPad")
+          deviceIcon = "tablet_mac";
+        else if (type === "Mac")
+          deviceIcon = "desktop_mac";
+        else if (type === "Android phone")
+          deviceIcon = "phone_android";
+        else if (type === "Android tablet")
+          deviceIcon = "tablet_android";
+        else if (type === "Windows PC")
+          deviceIcon = "desktop_windows";
+        else
+          deviceIcon = "computer";
+        
+        return deviceIcon;
+      };
+      
+      let allSurfaces = Object.keys(surfaces).concat(constraints.ignoredClients);
+      let surBox = surContainer.selectAll('.surface.box')
+        .data(allSurfaces.map((sId) =&gt; {
+          let s;
+          if (surfaces[sId] &amp;&amp; devices[surfaces[sId].deviceId]) {
+            s = Object.assign({}, surfaces[sId]);
+            s.clientList = Object.keys(s.clientMap);
+            s.details = s.resolution.width + "x" + s.resolution.height + "px";
+            s.deviceIcon = getDeviceIcon(devices[s.deviceId].type);
+          }
+          else if (webstrate.clients.includes(sId)) {
+            let dId = Object.keys(devices).find((dId) =&gt; {
+              return devices[dId].clients.includes(sId);
+            });
+            s = {
+              id: sId,
+              friendlyName: devices[dId].type + " (" + sId.slice(-3) + ")",
+              details: devices[dId].client_resolutions[sId].width + "x" + devices[dId].client_resolutions[sId].height + "px",
+              clientList: [sId],
+              deviceIcon: getDeviceIcon(devices[dId].type)};
+          }
+          else {
+            s = {
+              id: sId,
+              friendlyName: "Disconnected Surface (" + sId.slice(-3) + ")",
+              details: "Unknown",
+              clientList: [sId]};
+          }
+          return s;
+        }))
+        .enter().append("div")
+        .attr("class", "surface box");
+      
+      let surBoxHeader = surBox.append("div")
+        .attr("class", "surface header");
+      
+      surBoxHeader.append("div").append("span")
+        .attr("class", "title")
+        .text((s) =&gt; s.friendlyName);
+      
+      surBoxHeader.append("div").append("span")
+        .attr("class", "details")
+        .text((s) =&gt; s.details);
+      
+      let surIndicators = surBoxHeader
+        .append("div")
+        .attr("class", "surface indicators");
+      
+      surIndicators.append("span")
+        .classed("material-icons", true)
+        .attr("title", "Device type")
+      .text((s) =&gt; s.deviceIcon);
+      
+      surIndicators.append("span")
+        .attr("class", (s) =&gt; {
+        if (webstrate.clients.includes(s.id))
+          return this.data.constraints.ignoredClients.includes(s.clientList[0]) ? "manual" : "";
+        else
+          return "";
+        })
+        .text((s) =&gt; {
+          return this.data.constraints.ignoredClients.includes(s.clientList[0]) ? "visibility_off" : "visibility";
+        })
+        .classed("material-icons", true)
+        .classed("editable", true)
+        .attr("title", "Toggle visibility of view")
+        .on("click", (s, i, elems) =&gt; {
+          let data = this.data;
+          let ignoredClients = data.constraints.ignoredClients;
+           if (ignoredClients.includes(s.clientList[0])) {
+             elems[i].innerHTML = "visibility";
+             for (let i = ignoredClients.length - 1; i &gt;= 0; i--) {
+               if(s.clientList.includes(ignoredClients[i]))
+                 ignoredClients.splice(ignoredClients.indexOf(i), 1);
+             }
+           } else {
+             elems[i].innerHTML = "visibility_off";
+             ignoredClients = ignoredClients.concat(s.clientList);
+           }
+          data.constraints.ignoredClients = ignoredClients;
+          this.data = data;
+        });
+      
+      let vistributeSettings = container.append("div")
+        .attr("class", "all vistribute");
+      let vistributeHeader = vistributeSettings.append("div")
+        .attr("class", "vistribute title")
+        .append("span")
+        .text("Vistribute");
+      let vistributeContainer = vistributeSettings.append("div");
+      vistributeContainer
+        .style("width", width * 0.19 + "px")
+        .style("height", height - 40 + "px")
+        .attr("class", "vistribute container");
+      
+
+      let modeBox = vistributeContainer.append("div")
+        .attr("class", "vistribute box");
+      
+      let modeBoxHeader = modeBox.append("div")
+        .attr("class", "vistribute header");
+      
+      modeBoxHeader.append("div").append("span")
+        .attr("class", "title")
+        .text("Automatic Mode");
+      
+      let modeIndicators = modeBoxHeader
+        .append("div")
+        .attr("class", "vistribute indicators");
+      
+      modeIndicators.append("span")
+        .attr("class", () =&gt; {
+          return this.data.mode !== "manual" ? "activated" : "";
+        })
+        .text("important_devices")
+        .classed("material-icons", true)
+        .classed("editable", true)
+        .attr("title", "Toggle automatic mode")
+        .on("click", () =&gt; {
+          let data = this.data;
+          data.mode = data.mode === "manual" ? "automatic" : "manual";
+          this.data = data;
+        });
+    };  
+         
+    this.updateInterfacePreview = (surfaces, distribution, devices, views) =&gt; {
+           
+      let container = d3.select(this.interfacePreview);
+      container.selectAll(".surface").remove();
+      
+      let width = window.innerWidth;
+      let height = Math.min(880, (window.innerHeight - 60) * 0.5);
+      container
+        .style("width","100%" )
+        .style("height", height + "px");
+      
+      let sortedSurfaces = Object.keys(surfaces);
+      sortedSurfaces = sortedSurfaces.sort((a, b) =&gt; {
+        if (surfaces[a].relArea &lt; surfaces[b].relArea)
+          return 1;
+        else if (surfaces[a].relArea &gt; surfaces[b].relArea)
+          return -1;
+        return 0;
+      });
+      
+      
+      let totalRes = {width: 0, height: 0};
+      for (let sId of sortedSurfaces) {
+        totalRes.width += surfaces[sId].resolution.width;
+        totalRes.height = Math.max(totalRes.height, surfaces[sId].resolution.height);
+      }
+      
+      let scaleY = (height - 30) / totalRes.height;
+      let scaleX = (width - sortedSurfaces.length * 10 - 40) / totalRes.width;
+      let scale = Math.min(scaleY, scaleX);
+      
+      let surElements = container.selectAll(".surface")
+        .data(sortedSurfaces)
+        .enter().append("div")
+        .attr("class", "surface");
+      
+      let sNodes = surElements.nodes();
+      for (let sNode of sNodes) {
+        sNode.addEventListener("drop", (e) =&gt; {
+          e.stopPropagation();
+          let vId = e.dataTransfer.getData("id");
+          let parent = e.target;
+          while (!parent.classList.contains("surface")) {
+            parent = parent.parentNode;
+          }
+          let sId = d3.select(parent).data()[0];
+          let data = this.data;
+          
+          if (this.data.mode === "manual") {
+            let localDistr = data.manualDistribution[sId];
+            let s = surfaces[sId];
+            let size;
+            let newView;
+            if (!localDistr || !localDistr[vId]) {
+              newView = true;
+              for (let otherSId in data.manualDistribution) {
+                if (data.manualDistribution[otherSId][vId]) {
+                  delete data.manualDistribution[otherSId][vId];
+                  document.querySelector("#preview---" + vId).remove();
+                }
+              }
+              size = views[vId].size;
+          
+              if (size.width &gt; s.resolution.width || size.height &gt; s.resolution.height) {
+                let scale = Math.min(s.resolution.width / size.width, s.resolution.height / size.height);
+                size = {width: size.width * scale, height: size.height * scale};
+              }
+              
+            
+              for (let otherSId in data.manualDistribution) {
+                if (Object.keys(data.manualDistribution[otherSId]).length === 0)
+                  delete data.manualDistribution[otherSId];
+              }
+            }
+            
+            let bbox = parent.getBoundingClientRect();
+            let scale = s.resolution.width / bbox.width;
+            let x = parseInt(e.dataTransfer.getData("startX"));
+            let y = parseInt(e.dataTransfer.getData("startY"));
+            let pos;
+            if (x &amp;&amp; y &amp;&amp; !newView) {
+              let deltaX = e.x - x;
+              let deltaY = e.y - y;
+              let node = document.querySelector("#preview---" + vId);
+              if (node) {
+                let nodeBox = node.getBoundingClientRect();
+                node.style.left = ((nodeBox.left + deltaX) - bbox.left) + "px";
+                node.style.top = ((nodeBox.top + deltaY) - bbox.top) + "px";
+              }
+              pos = {x: localDistr[vId].pos.x + deltaX * scale, y: localDistr[vId].pos.y + deltaY * scale};
+            } else {
+              pos = {x: (e.x - bbox.left) * scale - size.width / 2, y: (e.y - bbox.top) * scale - size.height / 2 };
+            }
+            if (!localDistr)
+              localDistr = {};
+            if (newView) {
+              data = this.updateManualDistr(data, surfaces);
+              localDistr[vId] = {size: size, pos: pos};
+              data.manualDistribution[sId] = localDistr;
+              this.data = data;
+            }
+            return false;
+          }
+          
+          if (distribution[sId][vId]) {
+            return false;
+          }
+          
+          data.constraints.forcedAssignment[vId] = sId;
+          this.data = data;
+          return false;
+        });
+        
+        sNode.addEventListener("dragover", (e) =&gt; {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          return false;
+        });
+      }
+      
+      let surHeaders = surElements.append("div")
+        .attr("class", "header");
+      
+      surHeaders
+        .append("span")
+        	.text((d) =&gt; { return surfaces[d].friendlyName; })
+      		.attr("class", "title")
+        .on("click", (s, i, elems) =&gt; {
+          let elem = d3.select(d3.select(elems[i]).node().parentNode);
+          elem.classed("selected", !elem.classed("selected"));
+          this.updateSurfaceSelection();
+        });
+      let surQuickButtons = surHeaders.append("div").attr("class", "quickButtons");
+      surQuickButtons
+        .append("span")
+        .attr("class", "ignore")
+        .attr("title", "Ignore Surfaces")
+        .on("click", (d) =&gt; {
+          let data = this.data;
+          let clientIds = Object.keys(surfaces[d].clientMap);
+          data.constraints.ignoredClients = data.constraints.ignoredClients.concat(clientIds);
+          this.data = data;
+        })
+        .append("i")
+        .attr("class", "material-icons")
+        .text("visibility");
+      surQuickButtons
+        .append("span")
+        .attr("class", "identify")
+        .attr("title", "Identify Surfaces")
+        .on("click", (d) =&gt; { this.identifySurface(surfaces[d]); })
+        .append("i")
+        .attr("class", "material-icons")
+        .text("highlight");
+      
+      let surViewContainer = surElements.append("div")
+      	.attr("class", "surViewContainer")
+        .style("width", (d) =&gt; { return (surfaces[d].resolution.width * scale) + 'px'; })
+        .style("height", (d) =&gt; { return (surfaces[d].resolution.height * scale) + 'px'; });
+      
+      let viewContainer = surViewContainer.selectAll('.view')
+        .data((sId) =&gt; {
+          if (!distribution[sId])
+            return [];
+          let surDistr = Object.keys(distribution[sId]);
+          let data = surDistr.map((vId) =&gt; {
+            let v = views[vId];
+            v.surfaceId = sId;
+            v.pos = distribution[sId][vId].pos;
+            v.size = distribution[sId][vId].size;
+            return v;
+          });
+          return data;
+        })
+        .enter().append("div")
+        .attr("class", "view")
+        .attr("id", (v) =&gt; "preview---" + v.id)
+        .style("width", (v) =&gt; {
+          return (v.size.width * scale) + 'px';
+        })
+        .style("height", (v) =&gt; {
+          return (v.size.height * scale) + 'px';
+        })
+        .style("left", (v) =&gt; {
+          return (v.pos.x * scale) + 'px';
+        })
+        .style("top", (v) =&gt; {
+          return (v.pos.y * scale) + 'px';
+        });
+      
+      let viewData = viewContainer.data();
+      let viewNodes = viewContainer.nodes();
+      for (let i = 0; i &lt; viewData.length; i++) {
+        let v = viewData[i];
+        
+        let vNode = viewNodes[i];
+        vNode.setAttribute("draggable", true);
+        vNode.addEventListener("dragstart", (e) =&gt; {
+          let elem = e.target;
+          let elemBox = elem.getBoundingClientRect();
+          e.dataTransfer.setData("id", v.id);
+          e.dataTransfer.setData("startX", e.x);
+          e.dataTransfer.setData("startY", e.y);
+          e.dataTransfer.effectAllowed = "move";
+          if (v.id === "map") {
+            let canvas = document.createElementNS("http://www.w3.org/1999/xhtml","canvas");
+            canvas.width = elemBox.width;
+            canvas.height = elemBox.height;
+            let ctx = canvas.getContext("2d");
+            ctx.fillStyle = "gray";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            elem = canvas;
+          }
+          e.dataTransfer.setDragImage(elem, e.x - elemBox.left, e.y - elemBox.top);
+        });
+        
+        let node = Vistrate.getOutput(v.id).view.element.firstChild.cloneNode(true);
+        let w = parseInt(vNode.style.width.replace("px",""));
+        let h = parseInt(vNode.style.height.replace("px",""));
+        if (v.hasSvg)
+          node.style = `transform: scale(${w / node.getAttribute("width")}, ${h / node.getAttribute("height")}); position: absolute;`;
+        else {
+          node.style.transform = `scale(${w / node.getAttribute("width")}, ${h / node.getAttribute("height")})`;
+          node.style.position = "absolute";
+        }
+        let previewNode = document.createElement("div");
+        previewNode.classList.add("view-preview");
+        previewNode.appendChild(node);
+        viewNodes[i].appendChild(previewNode);        
+      }
+      
+      let viewElements = viewContainer
+        .append("div")
+        .attr("class", "viewElements");
+      
+      viewElements
+        .append("span")
+        .text((v) =&gt; { return Vistrate.getOutput(v.id).friendlyName; })
+        .attr("class", "title");
+      
+      viewElements
+        .append("span")
+        .text((v) =&gt; { return Vistrate.getOutput(v.id).template; })
+        .style("display", "none")
+        .attr("class", "detail");
+      
+      let viewIndicators = viewElements
+        .append("div")
+        .attr("class", "view-indicators");
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.group !== undefined ? "g-" + v.group + " active" : "";
+        })
+        .text((v) =&gt; v.group !== undefined ? "filter_" + (v.group + 1) : "")
+        .classed("group", true)
+        .classed("material-icons", true)
+        .attr("title", "View Group");
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.spaceReq ? "sr-" + Math.round(v.spaceReq) + " active" : "";
+        })
+        .style("opacity", (v) =&gt; v.spaceReq / 12 + 0.1)
+        .text("bubble_chart")
+        .classed("spaceReq", true)
+        .classed("material-icons", true)
+        .attr("title", (v) =&gt; "Space Requirement: " + Math.round(v.spaceReq));
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return this.data.constraints.forcedAssignment[v.id] ? "active" : "";
+        })
+        .text("phonelink_lock")
+        .classed("assigned", true)
+        .classed("material-icons", true)
+        .classed("manual", true)
+        .attr("title", "Manually Assigned to Surface");
+      
+      if (this.data.mode === "manual") {
+        let viewResizeBox = viewContainer.append("div")
+          .attr("class", "resizeBox");
+
+        let viewResizeHandle = viewResizeBox.append("div")
+         .attr("class", "resizeHandle");
+
+        let vNodes = viewContainer.nodes();
+        for (let vNode of vNodes) {
+          let handleNode = vNode.querySelector(".resizeHandle");
+          handleNode.addEventListener("pointerdown", (e) =&gt; {
+            e.stopPropagation();
+            e.preventDefault();
+            let box = e.target.parentNode;
+            box.classList.add("active");
+            this.handledBox = box;
+          });
+        }
+        if (!this.addedListener) {
+          document.addEventListener("pointermove", (e) =&gt; {
+            if (e.pressure === 0 || !this.handledBox)
+              return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            let box = this.handledBox;
+            let bbox = box.getBoundingClientRect();
+            let w = e.x - bbox.left;
+            let h = e.y - bbox.top;
+            box.style.width = w + "px";
+            box.style.height = h + "px";
+          });
+          document.addEventListener("pointerup", (e) =&gt; {
+            if (!this.handledBox)
+              return;
+
+            e.stopPropagation();
+            e.preventDefault();
+            let box = this.handledBox;
+            let viewBox = box.parentNode;
+            let vId = viewBox.id.split("---")[1];
+            box.classList.remove("active");
+            this.handledBox = undefined;
+            let bParent = viewBox.getBoundingClientRect();
+            let bbox = box.getBoundingClientRect();
+            viewBox.style.width = bbox.width + "px";
+            viewBox.style.height = bbox.height + "px";
+            
+            let node = Vistrate.getOutput(vId).view.element.firstChild;
+            let prevView = viewBox.querySelector(".view-preview").firstChild;
+            prevView.style.transform = `scale(${bbox.width / node.getAttribute("width")}, ${bbox.height / node.getAttribute("height")})`;
+            this.handledBox = undefined;
+          });
+          this.addedListener = true;
+        }
+      }
+    };
+    
+    this.updateMinimap = (surfaces, distribution, devices, views) =&gt; {
+           
+      let container = d3.select(this.interfaceMinimap);
+      container.selectAll(".surface").remove();
+      
+      let height = 75;
+      container.style("height", height + "px");
+      
+      let totalRes = {width: 0, height: 0};
+      let maxHeight = 0;
+      for (let sId in surfaces) {
+        maxHeight = Math.max(surfaces[sId].resolution.height, maxHeight);
+      }
+      let scale = height / maxHeight;
+      
+      let surElements = container.selectAll(".surface")
+        .data(Object.keys(surfaces))
+        .enter().append("div")
+        .attr("class", (sId) =&gt; { return surfaces[sId].change ? "change c-" + surfaces[sId].change : ""; })
+        .style("width", (sId) =&gt; { return (surfaces[sId].resolution.width * scale) + 'px'; })
+        .style("height", (sId) =&gt; { return (surfaces[sId].resolution.height * scale) + 'px'; })
+        .classed("surface", true);
+      
+      let surViewContainer = surElements.append("div")
+      	.attr("class", "surViewContainer")
+        .style("width", "100%")
+        .style("height", "100%");
+      
+      let viewElements = surViewContainer.selectAll('.view')
+        .data((sId) =&gt; {
+          if (!distribution[sId])
+            return [];
+          let surDistr = Object.keys(distribution[sId]);
+          let data = surDistr.map((vId) =&gt; {
+            let v = views[vId];
+            v.surfaceId = sId;
+            v.pos = distribution[sId][vId].pos;
+            v.size = distribution[sId][vId].size;
+            return v;
+          });
+          return data;
+        })
+        .enter().append("div")
+        .attr("class", (v) =&gt; { return v.change ? "change c-" + v.change : ""; })
+        .style("width", (v) =&gt; {
+          return (v.size.width / surfaces[v.surfaceId].resolution.width * 100) + '%';
+        })
+        .style("height", (v) =&gt; {
+          return (v.size.height / surfaces[v.surfaceId].resolution.height * 100) + '%';
+        })
+        .style("left", (v) =&gt; {
+          return (v.pos.x / surfaces[v.surfaceId].resolution.width * 100) + '%';
+        })
+        .style("top", (v) =&gt; {
+          return (v.pos.y / surfaces[v.surfaceId].resolution.height * 100) + '%';
+        })
+        .classed("view", true);
+      
+      let viewIndicators = viewElements
+        .append("div")
+        .attr("class", "view-indicators");
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.group !== undefined ? "g-" + v.group + " active" : "";
+        })
+        .text((v) =&gt; v.group !== undefined ? "filter_" + (v.group + 1) : "")
+        .classed("group", true)
+        .classed("material-icons", true);
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return v.spaceReq ? "sr-" + Math.round(v.spaceReq) + " active" : "";
+        })
+        .style("opacity", (v) =&gt; v.spaceReq / 12 + 0.1)
+        .text("bubble_chart")
+        .classed("spaceReq", true)
+        .classed("material-icons", true);
+      
+      viewIndicators.append("span")
+        .attr("class", (v) =&gt; {
+          return this.data.constraints.forcedAssignment[v.id] ? "active" : "";
+        })
+        .text("phonelink_lock")
+        .classed("assigned", true)
+        .classed("material-icons", true);
+    };
+    
+    this.updateConfiguration = () =&gt; {
+      if (document.body.getAttribute('transient-controlPanel') === "true") {
+        if (this.data.mode === "manual") {
+          let data = this.data;
+          data = this.updateManualDistr(data, this.src.viewBoardData.output.configuration.surfaces);
+          this.data = data;
+        }
+      }
+      
+      let clients = webstrate.clients.slice(0);
+      clients.sort();
+      if (clients[0] === webstrate.clientId) {
+        this.updateConstraints();
+      }
+      this.updatePanel();
+    };
+    
+    this.updateConstraints = () =&gt; {
+      let devices = this.src.devices.output;
+      // Check if outdated client ids must be updated
+      for (let dId in devices) {
+        for (let cId in devices[dId].former_clients_map) {
+          let oldCId = devices[dId].former_clients_map[cId];
+          if (oldCId !== null) {
+            let data = this.data;
+            let ignoredClients = data.constraints.ignoredClients;
+            if (ignoredClients.includes(oldCId)) {
+              ignoredClients.splice(ignoredClients.indexOf(oldCId), 1);
+              ignoredClients.push(cId);
+              this.data = data;
+            }
+          }
+        }
+      }
+      // TODO: Clean up zombie entries (when? not too early for replacing cIds on reload)
+    };
+    
+    this.outputConstraints = () =&gt; {
+      if (this.data) {
+        if (!this.data.constraints) {
+          this.data = {
+            "constraints": {
+              "ignoredDevices": [],
+              "ignoredSurfaces": [],
+              "ignoredViews": [],
+              "forcedAssignment": [],
+              "forcedGroups": []
+            }
+          };
+        } else {
+          this.output = this.data;
+        }
+      }
+    };
+    
+    this.identifySurface = (surface) =&gt; {
+      webstrate.signal({
+        cmd: "vistributeIdentify",
+        data: surface
+      }, Object.keys(surface.clientMap));
+    };
+    
+    this.getSurfaceByCId = (cId) =&gt; {
+      let surfaces = this.src.viewBoardData.output.configuration.surfaces;
+      for (let sId in surfaces) {
+        if (surfaces[sId].clientMap[cId])
+          return surfaces[sId];
+      }
+    };
+    
+    webstrate.on("signal", (message, senderId) =&gt; {
+      let {cmd, data} = message;
+      if (cmd === "vistributeIdentify") {
+        if (data.clientMap[webstrate.clientId]) {
+          let flash = document.createElement('div');
+          flash.innerHTML = `&lt;p&gt;This is ${data.friendlyName}!&lt;/p&gt;`;
+          let con = document.createElement('transient');
+          con.id = "vistributeFlash";
+          con.appendChild(flash);
+          document.body.appendChild(con);
+          setTimeout((con) =&gt; { document.getElementById('vistributeFlash').remove(); }, 3000);
+        }
+      }
+    });
+    
+    if (!this.panel)
+      this.generatePanel();
+    
+    if (!this.floatingQuickMenu)
+      this.generateFloatingButton();
+    
+    this.outputConstraints();
+    
+    if (!this.src.viewBoardData || !this.src.viewBoardData.output ||
+       !this.src.views || !this.src.views.output ||
+       !this.src.devices || !this.src.devices.output) {
+      
+    } else {
+      this.updatePanel();
+    }
+  },
+  update: function(source) {
+    //if (source !== "vistributeViewObserver")
+      this.floatingQuickMenu.classList.add("loading");
+    
+    if (!this.src.viewBoardData || !this.src.viewBoardData.output || !this.src.viewBoardData.output.configuration ||
+       !this.src.devices || !this.src.devices.output||
+       !this.src.views || !this.src.views.output) {
+      return;
+    }
+    
+    if (source === "vistributeDistributionStorage") {
+      let data = this.data;
+      data.manualDistribution = this.src.storage.output.distr;
+      data.constraints.ignoredClients = this.src.storage.output.ignoredClients;
+      this.data = data;
+      return;
+    }
+    
+    
+    if (source === "ownData") {
+      this.output = this.data;
+    } else if (source === "vistributeViewBoard") {
+      if (this.data.mode === "manual" &amp;&amp; this.src.viewBoardData.output.manualChange) {
+        let data = this.data;
+        let change = this.src.viewBoardData.output.manualChange;
+        let sId = Object.keys(change)[0];
+        let vId = Object.keys(change[sId])[0];
+        data.manualDistribution[sId][vId] = change[sId][vId];
+        this.data = data;
+      } else {
+        if (document.body.getAttribute('transient-controlPanel') === "true") {
+          this.updateConfiguration();
+        }
+        this.floatingQuickMenu.classList.remove("loading");
+        if (this.src.viewBoardData.output.updated) {
+          this.floatingQuickMenu.classList.add("highlight");
+          if (this.highlightTimeout)
+            clearTimeout(this.highlightTimeout);
+          this.highlightTimeout = setTimeout(() =&gt; { this.floatingQuickMenu.classList.remove("highlight"); }, 8000);
+        }
+      }
+    } else if (!this.initDone) {
+      this.floatingQuickMenu.classList.remove("loading");
+      this.updateConfiguration();
+      this.initDone = true;
+    }
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="7uQEajhH" name="Control Panel Data"><pre data-type="content" type="application/json" id="vistributeControlPanel-data" class="visdata">{
+  "config": {
+    "src": {
+      "viewBoardData": "vistributeViewBoard",
+      "devices": "vistributeDeviceObserver",
+      "views": "vistributeViewObserver",
+      "storage": "vistributeDistributionStorage"
+    },
+    "view": "vistributeControlPanel-view"
+  },
+  "data": {
+    "constraints": {
+      "ignoredClients": [],
+      "ignoredDevices": [],
+      "ignoredSurfaces": [],
+      "ignoredViews": [],
+      "forcedAssignment": [],
+      "forcedGroups": []
+    },
+    "mode": "automatic",
+    "study": false,
+    "manualDistribution": {}
+  }
+}</pre></div><div class="paragraph body-paragraph collapsed" data-id="5hriBrti" name="Control Panel View"><div data-type="content" type="text/html" codemirror="true" contenteditable="true" class="visview" id="vistributeControlPanel-view"></div></div><div class="paragraph style-paragraph collapsed" data-id="WhSVU8fh" name="CP Style - General"><style data-type="content" type="text/css" codemirror="true">#vistributeControlPanel {
+  position: fixed;
+  z-index: 300;
+  top: 0;
+  left: 0;
+  background-color: rgba(150, 150, 150, 1);
+  width: 100%;
+  height: 100%;
+}
+
+#vistributeFlash div {
+  position: fixed;
+  display: table;
+  font-size: 30px;
+  width: 100%;
+  height: 100%;
+  z-index: 900;
+  background: black;
+  opacity: 0.95;
+  top: 0;
+  left: 0;
+}
+
+#vistributeFlash div p {
+  text-align: center;
+  display: table-cell;
+  vertical-align: middle;
+}</style></div><div class="paragraph style-paragraph collapsed" data-id="cTrvKLmi" name="CP Style - Quick Menu"><style data-type="content" type="text/css" codemirror="true">#vistributeQuickMenu > div {
+  position: fixed;
+  z-index: 301;
+  display: block;
+  bottom: 0px;
+  right: 0px;
+  height: 85px;
+}
+
+#vistributeQuickMenu .button {
+  display: block;
+  background: #368cf9;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  float: right;
+  margin: 15px 10px 10px 5px;
+  cursor: pointer;
+  transition: all 0.5s ease-in-out;
+}
+
+#vistributeQuickMenu > div:hover > .button,
+#vistributeQuickMenu > div:active > .button,
+#vistributeQuickMenu.highlight .button,
+#vistributeQuickMenu.loading .button.vistribution {
+  opacity: 1 !important;
+}
+
+#vistributeQuickMenu > div:hover > .button + #vistributeMinimap,
+#vistributeQuickMenu > div:active > .button + #vistributeMinimap,
+#vistributeQuickMenu.highlight #vistributeMinimap {
+  opacity: 0.75 !important;
+}
+
+#vistributeQuickMenu.highlight #vistributeMinimap .surface.change {
+  background: #c99b46;
+}
+
+#vistributeQuickMenu.highlight #vistributeMinimap .view.change {
+  background: #77aff6;
+}
+
+#vistributeQuickMenu .button.vistributeSettings {
+  background: darkgray;
+  opacity: 0;
+  display: none !important;
+}
+#vistributeQuickMenu .button i.material-icons {
+  margin: 13px;
+}
+
+body[transient-controlpanel="true"] #vistributeQuickMenu .button,
+body[transient-viewBoard="true"] #vistributeQuickMenu .button:hover,
+body[transient-viewBoard="true"] #vistributeQuickMenu .button:active {
+  opacity: 1;
+  display: block;
+}
+
+body[transient-viewBoard="true"] #vistributeQuickMenu .button.vistribution {
+  opacity: 0.3;
+}
+
+#vistributeQuickMenu.loading .spinner {
+  opacity: 1;
+}
+
+#vistributeQuickMenu .spinner {
+  position: absolute;
+  right: 7px;
+  bottom: 17px;
+  transition: all 0.5s ease-in-out;
+  pointer-events: none;
+}
+
+#vistributeQuickMenu .spinner {
+  opacity: 0;
+  width: 59px;
+  height: 59px;
+  float: right;
+}
+
+#vistributeQuickMenu .spinner div {
+  box-sizing: border-box;
+  display: block;
+  position: absolute;
+  width: 58px;
+  height: 58px;
+  margin: 2px;
+  border: 2px solid #368cf9;
+  border-radius: 50%;
+  animation: spinner 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  border-color: #368cf9 transparent transparent transparent;
+}
+
+#vistributeQuickMenu .spinner div:nth-child(1) {
+  animation-delay: -0.45s;
+}
+
+#vistributeQuickMenu .spinner div:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+#vistributeQuickMenu .spinner div:nth-child(3) {
+  animation-delay: -0.15s;
+}
+@keyframes spinner {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}</style></div><div class="paragraph style-paragraph collapsed" data-id="mvxsNgCS" name="CP Style - Minimap"><style data-type="content" type="text/css" codemirror="true">body[transient-viewBoard="true"] #vistributeMinimap {
+  display: flex;
+}
+
+#vistributeMinimap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  opacity: 0;
+  float: left;
+  margin: 0px 10px 10px 5px;
+  transition: all 0.5s ease-in-out;
+  pointer-events: none;
+}
+
+#vistributeMinimap .surface {
+  background-color: #8591a0;
+  border-radius: 2px;
+  border: solid thin black;
+  margin: 2px;
+  position: relative;
+  transition: all 0.5s ease-in-out;
+}
+
+#vistributeMinimap .surface.selected {
+  border: solid thin orange;
+}
+
+#vistributeMinimap .surViewContainer {
+  margin: 0;
+  position: relative;
+}
+
+#vistributeMinimap .view {
+  border: solid thin #8591a0;
+  background-color: #d8d9da;
+  color: black;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  position: absolute;
+  cursor: pointer;
+  transition: all 0.5s ease-in-out;
+}
+
+#vistributeMinimap .view.selected {
+  border: solid thin #368cf9;
+  color: #368cf9;
+  background-color: #b6c5d4;
+}
+
+#vistributeMinimap .view-indicators span {
+  font-size: 0.8em;
+  font-family: 'Material Icons';
+  margin: 2px 2px;
+  display: none;
+}
+#vistributeMinimap .view-indicators span.active {
+  display: inline-block;
+}</style></div><div class="paragraph style-paragraph collapsed" data-id="8Kzx4ayt" name="CP Style - Interface Preview"><style data-type="content" type="text/css" codemirror="true">#interfacePreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.sur-preview .surface {
+  background-color: #484848;
+  border-radius: 2px;
+  border: solid 4px #222;
+  margin: 20px 5px 5px;
+  position: relative;
+}
+
+.sur-preview .surface.selected {
+  border: solid 4px orange;
+  margin: 5px;
+}
+
+.sur-preview .surface.selected .header .title {
+  color: orange;
+}
+
+.sur-preview .surface .header {
+  position: absolute;
+  z-index: 10;
+  top: -20px;
+  font-size: 0.8em;
+  width: 100%;
+  cursor: pointer;
+}
+
+.sur-preview .surface .header .quickButtons {
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.sur-preview .surface .header .quickButtons span {
+  cursor: pointer;
+  margin-left: 5px;
+}
+
+.sur-preview .surface .header .quickButtons span i {
+  font-size: 1em;
+}
+
+.sur-preview .surface .footer {
+  padding: 7px 10px;
+  position: absolute;
+  bottom: 0;
+  z-index: 10;
+  background-color: #8591a0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.sur-preview .detail {
+  margin-left: 5px;
+  font-size: 80%;
+  color: #5a5a5a;
+}
+
+.sur-preview .info {
+  font-style: italic;
+  font-size: 80%;
+}
+
+.sur-preview .surViewContainer {
+  position: relative;
+}
+
+.sur-preview .view {
+  border: solid 2px #f8f8f9;
+  background-color: #d8d9da;
+  color: black;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  position: absolute;
+  cursor: pointer;
+  font-size: 0.8em;
+}
+
+.sur-preview .view .view-preview {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.sur-preview .view .view-preview > * {
+  transform-origin: top left;
+}
+
+.sur-preview .view.selected {
+  border: solid 2px #368cf9;
+  color: #368cf9;
+  background-color: #b6c5d4;
+}
+
+.sur-preview .view.selected .title {
+  font-weight: bold;
+}
+
+.sur-preview .view .viewElements {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  background-color: rgba(255,255,255,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  font-size: 0.8em;
+  z-index: 100;
+}
+
+.sur-preview .view.selected .viewElements {
+  background-color: rgba(187, 215, 251, 0.95);
+}
+
+.sur-preview .view-indicators span {
+  font-size: 1.2em;
+  font-family: 'Material Icons';
+  margin: 2px 2px;
+  display: none;
+}
+.sur-preview .view-indicators span.active {
+  display: inline-block;
+}
+
+.sur-preview .view .resizeBox {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.sur-preview .view .resizeBox.active {
+  border: solid thin lightgray;
+}
+
+.sur-preview .view .resizeHandle {
+  position: absolute;
+    bottom: -5px;
+    right: -5px;
+    width: 10px;
+    height: 10px;
+    border: solid thin lightgray;
+    cursor: nw-resize;
+}</style></div><div class="paragraph style-paragraph collapsed" data-id="44e3PDw5" name="CP Style - Constraints Preview"><style data-type="content" type="text/css" codemirror="true">#constraintsPreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 35px;
+}
+
+#constraintsPreview .all {
+  background: #505050;
+  border-radius: 2px;
+}
+
+#constraintsPreview .all.surfaces,
+#constraintsPreview .all.vistribute {
+  margin-left: 1%;
+}
+
+#constraintsPreview .all > .title {
+  padding: 5px 10px;
+  font-size: 1.5em;
+  height: 40px;
+  border-bottom: solid thin white;
+  background: black;
+  margin: 0;
+  
+}
+
+#constraintsPreview .container {
+  overflow-y: scroll;
+  padding: 0 5px;
+  margin-top: 5px;
+}
+
+#constraintsPreview .box {
+  margin: 10px 0;
+  background: darkgray;
+}
+
+#constraintsPreview .box:first-child {
+  margin-top: 0;
+}
+
+#constraintsPreview .box.view {
+  cursor: move;
+}
+
+#constraintsPreview .box .header {
+  height: 30px;
+  background: #303030;
+}
+
+#constraintsPreview .box .header > div {
+  display: inline-block;
+  padding: 5px;
+}
+
+#constraintsPreview .box .header .details {
+  color: gray;
+  font-size: 0.8em;
+}
+
+#constraintsPreview .box .header .details:before {
+  color: gray;
+  content: "-";
+  margin-right: 10px;
+}
+
+#constraintsPreview .box .header .indicators {
+  float: right;
+}
+
+#constraintsPreview .box .header .indicators span {
+  font-size: 1.1em;
+  margin: 0 5px;
+  color: gray;
+}
+
+#constraintsPreview .box .header .indicators span.inactive {
+  display: none;
+}
+
+#constraintsPreview .box .header .indicators span.editable {
+  color: white;
+  cursor: pointer;
+}
+
+#constraintsPreview .box .header .indicators span.manual,
+#constraintsPreview .box .header .indicators span.activated {
+  color: var(--material-color-light-green);
+}
+
+#constraintsPreview .box .viewPreview {
+  display: none;
+}
+
+#constraintsPreview .box.expanded .viewPreview {
+  display: block;
+}
+
+#constraintsPreview .constrainType {
+  display: block;
+  padding: 10px;
+  width: 20%;
+  height: 80%;
+  margin: 0 2%;
+  background: gray;
+}
+
+#constraintsPreview .constrainType .title{
+  font-weight: bold;
+}
+
+#constraintsPreview .constrainType ul {
+  padding: 10px;
+  list-style-type: none;
+}
+
+#constraintsPreview .constrainType li {
+  padding: 5px;
+  background: #555;
+  cursor: pointer;
+}
+
+#constraintsPreview .constrainType li:nth-child(2n) {
+  background: #666;
+}
+
+#constraintsPreview .constrainType li i {
+  float: left;
+  font-size: 1.2em;
+  margin-right: 10px;
+}</style></div><div class="paragraph code-paragraph collapsed" data-id="b2JWsfVv" name="View Board" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" class="viscontroller" id="vistributeViewBoard">vc = {
+	data: 'vistributeViewBoard-data',
+	src: ["configuration"],
+	init: function() {
+    
+    if (!this.isInit) {
+      const GlobalToolbarUtils = require("#global-toolbar-utils");
+      GlobalToolbarUtils.addButton("Trigger Vistribute Mode", "", "vistribute-toggle", 1, () =&gt; {
+        Codestrate.executeCommand("vistribute.toggleVistribution");
+      });
+    }
+    this.defaultData = {
+      active: false,
+      configuration: {
+        distribution: {},
+        surfaces: {},
+        views: {}
+      }
+    };
+    
+    if (!this.data)
+      this.data = this.defaultData;
+    
+    if (!this.board)
+      this.board = document.createElement("div");
+    this.view.element.appendChild(this.board);
+    this.board.style.display = "block";
+    this.board.style.position = "relative";
+    this.board.style.width = `${document.documentElement.clientWidth}px`;
+    let scale = this.view.parent.clientWidth / document.documentElement.clientWidth;
+    this.board.style.transform = `scale(${scale})`;
+    this.board.style.transformOrigin = "top left";
+    this.board.id = "view-board";
+    
+    this.view.element.style.width = `${document.documentElement.clientWidth * scale}px`;
+    this.board.style.height = `100%`;
+    
+    this.board.addEventListener("drop", (e) =&gt; {
+      e.stopPropagation();
+      let vId = e.dataTransfer.getData("id");
+      let parent = e.target;
+      while (parent.id !== "view-board") {
+        parent = parent.parentNode;
+      }
+      
+      let s = this.getSurfaceByCId(webstrate.clientId);
+      let mode = this.data.configuration.mode;
+
+      if (mode === "manual" &amp;&amp; s) {
+        let data = this.data;
+        let localDistr = data.configuration.distribution[s.id];
+        let size = localDistr[vId].size;
+
+        let bbox = parent.getBoundingClientRect();
+        let x = parseInt(e.dataTransfer.getData("startX"));
+        let y = parseInt(e.dataTransfer.getData("startY"));
+        let pos;
+        if (x &amp;&amp; y) {
+          let deltaX = e.x - x;
+          let deltaY = e.y - y;
+          pos = {x: localDistr[vId].pos.x + deltaX, y: localDistr[vId].pos.y + deltaY};
+        } else {
+          pos = {x: (e.x - bbox.left) - size.width / 2, y: (e.y - bbox.top) - size.height / 2 };
+        }
+        localDistr[vId] = {size: size, pos: pos};
+        data.manualChange = {};
+        data.manualChange[s.id] = {};
+        data.manualChange[s.id][vId] = {size: size, pos: pos};
+        data.configuration.distribution[s.id] = localDistr;
+        this.data = data;
+        return false;
+      }
+    });
+
+    this.board.addEventListener("dragover", (e) =&gt; {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      return false;
+    });
+    
+    this.currentViews = [];
+    
+		this.distributeComponents = () =&gt; {
+      let s = this.getSurfaceByCId(webstrate.clientId);
+
+      let localDistribution;
+      if (s)
+        localDistribution = this.data.configuration.distribution[s.id];
+      
+      for (var i = this.currentViews.length - 1; i &gt;= 0; i--) {
+        if (!localDistribution || !localDistribution[this.currentViews[i]]) {
+          let vId = this.currentViews[i];
+          this.moveBackView(vId);
+          this.currentViews.splice(i, 1);
+          let div = document.querySelector("#viewBoard---" + vId);
+          if (div) {
+            div.remove();
+          }
+        }
+      }
+      
+      if (!s)
+        return;
+      
+      for (let vId in localDistribution) {
+        let comp = Vistrate.getOutput(vId);
+        let size = localDistribution[vId].size;
+        let pos = localDistribution[vId].pos;
+        
+        if (
+            (!comp.view.element.parent) ||
+            (comp.view.element.parent &amp;&amp; comp.view.element.parent.parent !== this.board)) {
+          let div = document.querySelector("#viewBoard---" + vId);
+          
+          if (!div) {
+            div = document.createElement("div");
+            div.style.position = "absolute";
+            div.id = "viewBoard---" + vId;
+            div.classList.add("viewBoard-view");
+            div.classList.add("manual");
+            this.board.appendChild(div);
+            
+            let labelDiv = document.createElement("div");
+            labelDiv.classList.add("view-label-con");
+            let label = document.createElement("span");
+            label.innerHTML = comp.friendlyName;
+            label.classList.add("view-label");            
+            
+            div.appendChild(labelDiv);
+            labelDiv.appendChild(label);
+            
+            if (this.data.configuration.mode === "manual") {
+              let dragNode = labelDiv;
+              dragNode.setAttribute("draggable", true);
+              dragNode.addEventListener("dragstart", (e) =&gt; {
+                let elem = e.target.parentNode;
+                let elemBox = elem.getBoundingClientRect();
+                
+                e.dataTransfer.setData("id", vId);
+                e.dataTransfer.setData("startX", e.x);
+                e.dataTransfer.setData("startY", e.y);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setDragImage(elem, e.x - elemBox.left, e.y - elemBox.top);
+              });
+            }
+            
+            let resizeBox = document.createElement("div");
+            let resizeHandle = document.createElement("div");
+            div.appendChild(resizeBox);
+            div.appendChild(resizeHandle);
+            resizeBox.classList.add("resizeBox");
+            resizeHandle.classList.add("resizeHandle");
+            resizeHandle.addEventListener("pointerdown", (e) =&gt; {
+              
+              e.stopPropagation();
+              e.preventDefault();
+              let box = e.target.parentNode.querySelector('.resizeBox');
+              box.classList.add("active");
+              this.handledBox = box;
+            });
+          }
+          div.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+          
+          
+          
+          if (!this.currentViews.includes(vId)) {
+            comp.view.moveTo(div);
+            this.currentViews.push(vId);
+          }
+          
+          comp.update({"resize": {"width": size.width, "height": size.height}});
+        }
+      }
+      
+      if (!this.addedListener) {
+        document.addEventListener("pointermove", (e) =&gt; {
+          if (e.pressure === 0 || !this.handledBox)
+            return;
+          e.stopPropagation();
+          e.preventDefault();
+          let box = this.handledBox;
+          let bbox = box.getBoundingClientRect();
+          let w = e.x - bbox.left;
+          let h = e.y - bbox.top;
+          box.style.width = w + "px";
+          box.style.height = h + "px";
+        });
+        document.addEventListener("pointerup", (e) =&gt; {
+          if (!this.handledBox)
+            return;
+
+          e.stopPropagation();
+          e.preventDefault();
+          let box = this.handledBox;
+          let viewBox = this.handledBox.parentNode;
+          box.classList.remove("active");
+          this.handledBox = undefined;
+          let bParent = viewBox.getBoundingClientRect();
+          let bbox = box.getBoundingClientRect();
+          let scaleX = bbox.width / bParent.width;
+          let scaleY = bbox.height / bParent.height;
+          let vId = viewBox.id.split("---")[1];
+          let s = this.getSurfaceByCId(webstrate.clientId);
+          let data = this.data;
+          let v = data.configuration.distribution[s.id][vId];
+          v.size = {
+            width: v.size.width * scaleX,
+            height: v.size.height * scaleY
+          };
+
+          data.configuration.distribution[s.id][vId] = v;
+
+          data.manualChange = {};
+          data.manualChange[s.id] = {};
+          data.manualChange[s.id][vId] = v;
+          this.data = data;
+        });
+        this.addedListener = true;
+      }
+    };
+    
+    this.moveBackView = (vId) =&gt; {
+      let comp = Vistrate.getOutput(vId);
+      let parent = comp.view.parent;
+      comp.view.moveBack();
+      comp.update({resize: {width: 0, height: 0}});
+    };
+    
+    this.moveBackAllViews = () =&gt; {
+      for (let vId of this.currentViews)
+        this.moveBackView(vId);
+      
+      this.currentViews = [];
+    };
+    
+    this.hideViewBoard = () =&gt; {
+      let container = document.getElementById("vistributeViewBoardContainer");
+      if (!container) return;
+      if(document.body.getAttribute('transient-viewBoard') === "true") {
+        this.view.parent.appendChild(container.firstChild);
+        document.body.setAttribute("transient-viewBoard", false);
+      
+        let scale = this.view.parent.clientWidth / document.documentElement.clientWidth;
+        this.board.style.transform = `scale(${scale})`;
+        
+        let d = this.getSurfaceByCId(webstrate.clientId);
+        this.moveBackAllViews();
+        this.board.innerHTML = "";
+      }
+    };
+
+    this.showViewBoard = () =&gt; {
+      if (this.silentObserver)
+        return;
+      
+      if(document.body.getAttribute('transient-viewBoard') !== "true") {
+        let container = document.getElementById("vistributeViewBoardContainer");
+        if (!container) {
+          container = document.createElement("transient");
+          container.setAttribute("id", "vistributeViewBoardContainer");
+          document.body.appendChild(container);
+        }
+
+        container.appendChild(this.view.element);
+        document.body.setAttribute("transient-viewBoard", true);
+      }
+      
+      this.distributeComponents();
+      this.board.style.transform = "scale(1)";
+      if (this.data.configuration.mode === "manual") {
+        this.board.classList.add("manual");
+      } else {
+        this.board.classList.remove("manual");
+      }
+    };
+          
+    if (!this.isInit) {
+      Codestrate.addCommand("vistribute.toggleVistribution", "Toggle vistribute mode", () =&gt; {
+        if(this.data &amp;&amp; this.data.active){
+          this.data = {
+            active: false,
+            configuration: this.data.configuration
+          };
+        }
+        else{
+          if (this.data &amp;&amp; !this.data.active)
+            this.data = {
+              active: true,
+              configuration: this.data.configuration
+            };
+        }
+      }, "Toggle the vistribute mode");
+
+      Codestrate.addKeyBinding("vistribute.toggleVistribution", 'mod+o', true);
+
+      window.addEventListener("codestrateloaded", () =&gt; {
+        this.output = this.data;
+      });
+      this.isInit = true;
+    }
+    
+    this.getSurfaceByCId = (cId) =&gt; {
+      let surfaces = this.data.configuration.surfaces;
+      for (let sId in surfaces) {
+        if (surfaces[sId].clientMap[cId])
+          return surfaces[sId];
+      }
+    };
+    
+    let urlParams = new URLSearchParams(window.location.search);
+    this.silentObserver = urlParams.has('silentObserver');
+	},
+	update: function(source) {
+		if (this.src.configuration &amp;&amp; this.src.configuration.output &amp;&amp; source === "vistributeDistributionManager") {
+      this.data = {
+        active: this.data.active,
+        configuration: this.src.configuration.output
+      };
+      return;
+    }
+    else if (source === "ownData" &amp;&amp; this.data.active &amp;&amp; this.data.configuration){
+      this.showViewBoard();
+    }
+    else if (source === "ownData" &amp;&amp; !this.data.active) {
+      this.hideViewBoard();
+    }
+    else if (this.data.active &amp;&amp; this.data.configuration &amp;&amp; !this.src.configuration.output) {
+      this.showViewBoard();
+    }
+    
+    let data = this.data;
+    let updated;
+    if (this.output &amp;&amp; this.output.configuration) {
+      let newDistr = data.configuration.distribution;
+      for (let sId in newDistr) {
+        let oldDistr = this.output.configuration.distribution;
+        if (!oldDistr[sId] &amp;&amp; data.configuration.surfaces[sId]) {
+          data.configuration.surfaces[sId].change = "new";
+          updated = "distribution";
+        }
+        else {
+          for (let vId in newDistr[sId]) {
+            if (!oldDistr[sId] || !oldDistr[sId][vId]) {
+              data.configuration.views[vId].change = "surface";
+              updated = "distribution";
+            }
+          }
+        }
+      }
+    }
+    data.updated = updated;
+    this.output = data;
+	},
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="UBBWCHLi" name="View Board Data"><pre data-type="content" type="application/json" id="vistributeViewBoard-data" class="visdata">{
+  "config": {
+    "src": {
+      "configuration": "vistributeDistributionManager"
+    },
+    "view": "vistributeViewBoard-view"
+  },
+  "data": {
+    "active": true,
+    "configuration": {
+      "distribution": {
+        "s-TSzk7UQvB": {
+          "map-CrimeLocations": {
+            "size": {
+              "width": 457.417556754524,
+              "height": 576.5807629891826
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "uIFilter": {
+            "size": {
+              "width": 290.90866036386376,
+              "height": 258.58547587899005
+            },
+            "pos": {
+              "x": 457.4175567545241,
+              "y": 113.47536171179684
+            }
+          },
+          "bars-Weapons-Filtered": {
+            "size": {
+              "width": 457.41755675452407,
+              "height": 172.8445634548996
+            },
+            "pos": {
+              "x": 0,
+              "y": 576.5807629891826
+            }
+          },
+          "bars-Inside-Outside-Filtered": {
+            "size": {
+              "width": 228.70877837726206,
+              "height": 307.5746735559178
+            },
+            "pos": {
+              "x": 0,
+              "y": 749.4253264440822
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime-2016": {
+            "size": {
+              "width": 678.7868741823488,
+              "height": 220.95926893956664
+            },
+            "pos": {
+              "x": 457.4175567545241,
+              "y": 404.3840220756606
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime-2017": {
+            "size": {
+              "width": 678.7868741823488,
+              "height": 318.181347272976
+            },
+            "pos": {
+              "x": 457.4175567545241,
+              "y": 625.3432910152272
+            }
+          },
+          "lines-SelectedDistrictsOverTime-2016": {
+            "size": {
+              "width": 783.7955690631273,
+              "height": 275.55312974875574
+            },
+            "pos": {
+              "x": 1136.204430936873,
+              "y": 252.94687025124426
+            }
+          },
+          "lines-SelectedDistrictsOverTime-2017": {
+            "size": {
+              "width": 783.7955690631273,
+              "height": 275.5531297487557
+            },
+            "pos": {
+              "x": 1136.204430936873,
+              "y": 528.5
+            }
+          },
+          "bars-CrimeTypes-All": {
+            "size": {
+              "width": 387.87821381848505,
+              "height": 290.90866036386376
+            },
+            "pos": {
+              "x": 748.3262171183878,
+              "y": 113.47536171179684
+            }
+          },
+          "bars-District-All": {
+            "size": {
+              "width": 228.70877837726206,
+              "height": 307.5746735559178
+            },
+            "pos": {
+              "x": 228.70877837726206,
+              "y": 749.4253264440822
+            }
+          }
+        }
+      },
+      "surfaces": {
+        "s-TSzk7UQvB": {
+          "id": "s-TSzk7UQvB",
+          "friendlyName": "Windows PC (QvB)",
+          "deviceId": "D-9xFWXJen",
+          "resolution": {
+            "width": 1920,
+            "height": 1057
+          },
+          "area": 2029440,
+          "aspectRatio": 1.816461684011353,
+          "class": "desktop",
+          "clientMap": {
+            "b4MZTA-lQ": {
+              "x": 0,
+              "y": 0,
+              "width": 1920,
+              "height": 1057
+            }
+          },
+          "relArea": 1
+        }
+      },
+      "views": {
+        "bars-CrimeTypes-All": {
+          "id": "bars-CrimeTypes-All",
+          "template": "Vertical Bar Chart",
+          "friendlyName": "Bars - Crime Types - all",
+          "size": {
+            "width": 800,
+            "height": 400
+          },
+          "props": {
+            "key": {
+              "src": "data",
+              "prop": "Description"
+            },
+            "value": {
+              "src": "data",
+              "prop": "value"
+            }
+          },
+          "src": {
+            "data": "aggregator-CrimeTypes"
+          },
+          "hasSvg": true,
+          "dataPoints": 15,
+          "spaceReq": 3.9068905956085187,
+          "aspectRatio": 2,
+          "relSpaceReq": 0.059628280472127385,
+          "localSize": {
+            "width": 387.87821381848505,
+            "height": 290.90866036386376
+          }
+        },
+        "bars-District-All": {
+          "id": "bars-District-All",
+          "template": "Vertical Bar Chart",
+          "friendlyName": "Bars - District - all",
+          "size": {
+            "width": 600,
+            "height": 300
+          },
+          "props": {
+            "key": {
+              "src": "data",
+              "prop": "District"
+            },
+            "value": {
+              "src": "data",
+              "prop": "value"
+            }
+          },
+          "src": {
+            "data": "aggregator-District"
+          },
+          "hasSvg": true,
+          "dataPoints": 9,
+          "spaceReq": 3.169925001442312,
+          "aspectRatio": 2,
+          "relSpaceReq": 0.04838046329581711,
+          "localSize": {
+            "width": 228.70877837726206,
+            "height": 307.5746735559178
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime-2016": {
+          "id": "lines-SelectedCrimeTypesOverTime-2016",
+          "template": "Date Line Chart",
+          "friendlyName": "Lines - Selected Crime Types over Time - 2016",
+          "size": {
+            "width": 960,
+            "height": 200
+          },
+          "props": {
+            "date": {
+              "src": "data",
+              "prop": "CrimeDate"
+            },
+            "values": {
+              "src": "data",
+              "prop": "values"
+            }
+          },
+          "src": {
+            "data": "aggregator-SelectedCrimeTypesOverTime-2016"
+          },
+          "hasSvg": true,
+          "dataPoints": 366,
+          "spaceReq": 8.515699838284043,
+          "aspectRatio": 4.8,
+          "group": 0,
+          "relSpaceReq": 0.1299694798068851,
+          "localSize": {
+            "width": 678.7868741823488,
+            "height": 220.95926893956664
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime-2017": {
+          "id": "lines-SelectedCrimeTypesOverTime-2017",
+          "template": "Date Line Chart",
+          "friendlyName": "Lines - Selected Crime Types over Time - 2017",
+          "size": {
+            "width": 960,
+            "height": 200
+          },
+          "props": {
+            "date": {
+              "src": "data",
+              "prop": "CrimeDate"
+            },
+            "values": {
+              "src": "data",
+              "prop": "values"
+            }
+          },
+          "src": {
+            "data": "aggregator-SelectedCrimeTypesOverTime-2017"
+          },
+          "hasSvg": true,
+          "dataPoints": 365,
+          "spaceReq": 8.51175265376738,
+          "aspectRatio": 4.8,
+          "group": 0,
+          "relSpaceReq": 0.12990923654701514,
+          "localSize": {
+            "width": 678.7868741823488,
+            "height": 318.181347272976
+          }
+        },
+        "lines-SelectedDistrictsOverTime-2016": {
+          "id": "lines-SelectedDistrictsOverTime-2016",
+          "template": "Date Line Chart",
+          "friendlyName": "Lines - Selected Districts over Time - 2016",
+          "size": {
+            "width": 960,
+            "height": 150
+          },
+          "props": {
+            "date": {
+              "src": "data",
+              "prop": "CrimeDate"
+            },
+            "values": {
+              "src": "data",
+              "prop": "values"
+            }
+          },
+          "src": {
+            "data": "aggregator-SelectedDistrictsOverTime-2016"
+          },
+          "hasSvg": true,
+          "dataPoints": 366,
+          "spaceReq": 8.515699838284043,
+          "aspectRatio": 6.4,
+          "group": 1,
+          "relSpaceReq": 0.1299694798068851,
+          "localSize": {
+            "width": 783.7955690631273,
+            "height": 275.55312974875574
+          }
+        },
+        "lines-SelectedDistrictsOverTime-2017": {
+          "id": "lines-SelectedDistrictsOverTime-2017",
+          "template": "Date Line Chart",
+          "friendlyName": "Lines - Selected Districts over Time - 2017",
+          "size": {
+            "width": 960,
+            "height": 150
+          },
+          "props": {
+            "date": {
+              "src": "data",
+              "prop": "CrimeDate"
+            },
+            "values": {
+              "src": "data",
+              "prop": "values"
+            }
+          },
+          "src": {
+            "data": "aggregator-SelectedDistrictsOverTime-2017"
+          },
+          "hasSvg": true,
+          "dataPoints": 365,
+          "spaceReq": 8.51175265376738,
+          "aspectRatio": 6.4,
+          "group": 1,
+          "relSpaceReq": 0.12990923654701514,
+          "localSize": {
+            "width": 783.7955690631273,
+            "height": 275.5531297487557
+          }
+        },
+        "bars-Inside-Outside-Filtered": {
+          "id": "bars-Inside-Outside-Filtered",
+          "template": "Horizontal Bar Chart",
+          "friendlyName": "Bars - Inside-Outside - Filtered",
+          "size": {
+            "width": 500,
+            "height": 250
+          },
+          "props": {
+            "key": {
+              "src": "data",
+              "prop": "Inside/Outside"
+            },
+            "value": {
+              "src": "data",
+              "prop": "value"
+            }
+          },
+          "src": {
+            "data": "aggregator-Inside-Outside-Filtered"
+          },
+          "hasSvg": true,
+          "dataPoints": 3,
+          "spaceReq": 1.584962500721156,
+          "aspectRatio": 2,
+          "group": 2,
+          "relSpaceReq": 0.024190231647908556,
+          "localSize": {
+            "width": 228.70877837726206,
+            "height": 307.5746735559178
+          }
+        },
+        "bars-Weapons-Filtered": {
+          "id": "bars-Weapons-Filtered",
+          "template": "Horizontal Bar Chart",
+          "friendlyName": "Bars - Weapons - Filtered",
+          "size": {
+            "width": 700,
+            "height": 300
+          },
+          "props": {
+            "key": {
+              "src": "data",
+              "prop": "Weapon"
+            },
+            "value": {
+              "src": "data",
+              "prop": "value"
+            }
+          },
+          "src": {
+            "data": "aggregator-Weapons-Filtered"
+          },
+          "hasSvg": true,
+          "dataPoints": 5,
+          "spaceReq": 2.321928094887362,
+          "aspectRatio": 2.3333333333333335,
+          "group": 2,
+          "relSpaceReq": 0.03543804882421882,
+          "localSize": {
+            "width": 457.41755675452407,
+            "height": 172.8445634548996
+          }
+        },
+        "uIFilter": {
+          "id": "uIFilter",
+          "template": "Visual Filter",
+          "friendlyName": "UI Filter",
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "src": {
+            "data": "baltimoreCrimesData-2016-17"
+          },
+          "hasSvg": false,
+          "dataPoints": 99882,
+          "group": 2,
+          "relSpaceReq": 0.05912961210974456,
+          "localSize": {
+            "width": 290.90866036386376,
+            "height": 258.58547587899005
+          }
+        },
+        "map-CrimeLocations": {
+          "id": "map-CrimeLocations",
+          "template": "Simple Leaflet Map",
+          "friendlyName": "Map - Crime Locations",
+          "size": {
+            "width": 950,
+            "height": 850
+          },
+          "props": {
+            "lat": {
+              "src": "data",
+              "prop": "Latitude"
+            },
+            "lng": {
+              "src": "data",
+              "prop": "Longitude"
+            },
+            "name": {
+              "src": "data",
+              "prop": "Description"
+            }
+          },
+          "src": {
+            "data": "uIFilter"
+          },
+          "hasSvg": true,
+          "dataPoints": 99882,
+          "spaceReq": 16.607937089093443,
+          "aspectRatio": 1.1176470588235294,
+          "group": 2,
+          "relSpaceReq": 0.253475930942383,
+          "localSize": {
+            "width": 457.417556754524,
+            "height": 576.5807629891826
+          }
+        }
+      },
+      "timestamp": 1558014745172,
+      "mode": "automatic"
+    }
+  }
+}</pre></div><div class="paragraph body-paragraph locked collapsed" data-id="K7TUhJ6j" name="View Board View"><div data-type="content" type="text/html" codemirror="true" contenteditable="false" class="visview" id="vistributeViewBoard-view"></div></div><div class="paragraph style-paragraph collapsed" data-id="p4K3pHBz" name="View Board Style"><style data-type="content" type="text/css" codemirror="true">/* CSS here */
+body[transient-viewBoard] #vistributeViewBoardContainer {
+	position: fixed;
+	right: 0%;
+	top: 0%;
+  width: 100%;
+  height: 100%;
+  z-index: 200;
+	background-color: white;
+  transform: translate3d(100%, 0, 0);
+  box-shadow: none;
+}
+
+body[transient-viewBoard="true"] #vistributeViewBoardContainer {
+  transform: translate3d(0, 0, 0);
+  box-shadow: 0 0 10px gray;
+}
+
+body[transient-viewBoard="true"] #vistributeViewBoardContainer > .visview {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+body[transient-viewBoard="true"] {
+  overflow: hidden;
+}
+
+body[transient-viewBoard="true"] #sections {
+  display: none;
+}
+
+#vistributeViewBoardContainer .viewBoard-view > transient > * {
+  border: solid thin lightgray;
+}
+
+#vistributeViewBoardContainer .viewBoard-view .view-label-con {
+  position: absolute;
+  width: 100%;
+  top: 0;
+  text-align: center;
+  pointer-events: none;
+  color: hsla(0, 0%, 65%, 1);
+  font-size: 0.6em;
+  display: flex;
+  justify-content: center;
+  background: rgba(200, 200, 200, 0.25);
+  padding: 5px;
+  z-index: 150;
+  cursor: move;
+}
+
+#vistributeViewBoardContainer #view-board.manual .viewBoard-view .view-label-con {
+  pointer-events: all;
+}
+
+#vistributeViewBoardContainer .viewBoard-view[draggable="true"] {
+  cursor: move;
+}
+
+#vistributeViewBoardContainer .viewBoard-view .resizeBox {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 150;
+}
+
+#vistributeViewBoardContainer .viewBoard-view .resizeBox.active {
+  border: solid thin lightgray;
+}
+
+#vistributeViewBoardContainer .viewBoard-view .resizeHandle {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  border: solid thin lightgray;
+  cursor: nw-resize;
+  display: none;
+}
+
+#vistributeViewBoardContainer #view-board.manual .viewBoard-view .resizeHandle {
+  display: inherit;
+}
+
+svg foreignObject > .viewContainer {
+	overflow: hidden;
+}</style></div><div class="paragraph style-paragraph collapsed" data-id="mAuMabkN" name="View Board Toolbar Style"><style data-type="content" type="text/css" codemirror="true">html #global-toolbar .vistribute-toggle i:after {
+	content: "important_devices";
+}</style></div></div>

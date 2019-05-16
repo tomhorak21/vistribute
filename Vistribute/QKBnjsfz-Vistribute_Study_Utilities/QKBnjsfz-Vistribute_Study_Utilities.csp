@@ -1,0 +1,3141 @@
+<div class="section section-visible collapsed" data-id="QKBnjsfz" name="Vistribute Study Utilities" data-type="package"><div class="paragraph body-paragraph collapsed" name="Documentation" data-id="HRmipczW"><div data-type="content" type="text/html" codemirror="true" contenteditable="true" class="section-documentation"><h2>Description</h2>
+<div>Utilities for user studies with Vistribute</div></div></div><div class="paragraph data-paragraph collapsed" name="Properties" data-id="pMuf3HN4"><pre data-type="content" type="application/json" class="section-properties">{
+  "version": "1.0",
+  "description": "Utilities for user studies with Vistribute.",
+  "dependencies": [
+    {
+			"id": "DwBQbXcg",
+			"name": "Vistribute",
+			"optional": false
+		}
+  ],
+  "changelog": {
+    "1.0": "Initial version."
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="u6KdrXLs" name="Distribution Logger" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeDistributionLogger" class="viscontroller">vc = {
+  data: 'vistributeDistributionLogger-data',
+  src: ['data', 'devices'],
+  init: function() {
+    this.log = () =&gt; {
+      this.update("vistributeDeviceObserver");
+    };
+    
+    this.onCodestrateLoaded = () =&gt; {
+      if (!this.addedListener) {
+        window.onerror = (msg, url, line, col, err) =&gt; {
+          if (!this.config.active)
+            return;
+
+          let data = this.data;
+          let errObj = {
+            msg: msg,
+            url: url,
+            line: line,
+            col: col,
+            client: webstrate.clientId,
+            timestamp: Date.now()
+          };
+          setTimeout(() =&gt; {
+            data.errors.push(errObj);
+            this.data = data;
+          }, Math.random() * 1000);
+          
+        };
+        this.addedListener = true;
+      }
+    };
+    
+    window.addEventListener("codestrateloaded", this.onCodestrateLoaded);
+    
+  },
+  update: function(source) {
+    if (this.config.active &amp;&amp; source === "vistributeDeviceObserver") {
+      if (this.src.data &amp;&amp; this.src.data.output) {
+        let cId = this.src.data.data.clientOnDuty;
+        if (cId !== webstrate.clientId)
+          return;
+        
+        let data = this.data;
+        if (!this.lastSurfaces || (this.lastSurfaces &amp;&amp; Object.keys(this.lastSurfaces).length !== Object.keys(this.src.data.output.surfaces).length)) {
+          
+          let surs = {
+            timestamp: Date.now(),
+            surfaces: this.src.data.output.surfaces
+          };
+          data.surfaces.push(surs);
+          this.lastSurfaces = this.src.data.output.surfaces;
+        }
+        let distr = {
+          timestamp: Date.now(),
+          distr: this.src.data.output.distribution
+        };
+        data.distributions.push(distr);
+        this.data = data;
+      }
+    }
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="Hynh43Td" name="Distribution Logger Data"><pre data-type="content" type="application/json" id="vistributeDistributionLogger-data" class="visdata">{
+  "config": {
+    "src": {
+      "data": "vistributeDistributionManager",
+      "devices": "vistributeDeviceObserver"
+    },
+    "active": false
+  },
+  "data": {}
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="xsfb2SYW" name="Distribution Storage" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeDistributionStorage" class="viscontroller">vc = {
+  data: 'vistributeDistributionStorage-data',
+  src: ['devices'],
+  init: function() {
+    this.deviceMap = {};
+    this.getDistribution = (key) =&gt; {
+      let distr = this.data[key];
+      let updatedDistr = {};
+      let ignoredClients = [];
+      
+      for (let placeholder in this.deviceMap) {
+        if (distr &amp;&amp; distr[placeholder]) {
+          updatedDistr[this.deviceMap[placeholder].sId] = distr[placeholder];
+        } else {
+          ignoredClients = ignoredClients.concat(this.deviceMap[placeholder].cIds);
+        }
+      }
+      console.log(this.deviceMap, ignoredClients, updatedDistr);
+      this.output = {
+        distr: updatedDistr,
+        ignoredClients: ignoredClients
+      };
+    };
+    
+    this.updateDeviceMap = () =&gt; {      
+      let devices = this.src.devices.output;
+      let deviceConfig = this.config.devices;
+      for (let placeholder in deviceConfig) {
+        if (devices[deviceConfig[placeholder].dId]) {
+          let d = devices[deviceConfig[placeholder].dId];
+          if (d.clients.length === 1) {
+            this.deviceMap[placeholder] = {};
+            let cId = d.clients[0];
+            this.deviceMap[placeholder].sId = 's-' + d.sessionIds[cId];
+            this.deviceMap[placeholder].cIds = [cId];
+          } else {
+            for (let cId of d.clients) {
+              let cRes = d.client_resolutions[cId];
+              let res = deviceConfig[placeholder].res;
+              if (cRes.width === res.width &amp;&amp; cRes.height === res.height) {
+                this.deviceMap[placeholder] = {};
+                this.deviceMap[placeholder].sId = 's-' + d.sessionIds[cId];
+                if (!this.deviceMap[placeholder].cIds)
+                  this.deviceMap[placeholder].cIds = [];
+                this.deviceMap[placeholder].cIds.push(cId);
+              }
+            }
+          }
+        }
+      }
+    };
+  },
+  update: function(source) {
+    if (this.src.devices &amp;&amp; this.src.devices.output)
+      this.updateDeviceMap();
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="bByJ7s45" name="Distribution Storage Data"><pre data-type="content" type="application/json" id="vistributeDistributionStorage-data" class="visdata">{
+  "config": {
+    "src": {
+      "devices": "vistributeDeviceObserver"
+    },
+    "devices": {
+      "phone": {
+        "dId": "D-RjsWu92s",
+        "res": {
+          "width": 692,
+          "height": 280
+        }
+      },
+      "tablet": {
+        "dId": "D-knuswmdb",
+        "res": {
+          "width": 1024,
+          "height": 600
+        }
+      },
+      "laptop": {
+        "dId": "D-B5yGVMJ4",
+        "res": {
+          "width": 1600,
+          "height": 789
+        }
+      },
+      "large-display": {
+        "dId": "D-DXkQbcVE",
+        "res": {
+          "width": 1920,
+          "height": 969
+        }
+      },
+      "desktop-1": {
+        "dId": "D-4qRaasTd",
+        "res": {
+          "width": 1920,
+          "height": 990
+        }
+      },
+      "desktop-2": {
+        "dId": "D-4qRaasTd",
+        "res": {
+          "width": 1200,
+          "height": 1830
+        }
+      }
+    }
+  },
+  "data": {
+    "auto:traditional": {
+        "desktop-1": {
+          "lines-DistrictsOverTime": {
+            "size": {
+              "width": 1920,
+              "height": 304.1259478355231
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedDistrictsOverTime2017": {
+            "size": {
+              "width": 1920,
+              "height": 303.4687547147248
+            },
+            "pos": {
+              "x": 0,
+              "y": 304.1259478355231
+            }
+          },
+          "bars-CrimeTypes": {
+            "size": {
+              "width": 1090.4931729952402,
+              "height": 382.405297449752
+            },
+            "pos": {
+              "x": 0,
+              "y": 607.5947025502479
+            }
+          },
+          "bars-District": {
+            "size": {
+              "width": 829.5068270047597,
+              "height": 382.405297449752
+            },
+            "pos": {
+              "x": 1090.4931729952402,
+              "y": 607.5947025502479
+            }
+          }
+        },
+        "desktop-2": {
+          "lines-CrimeTypeOverTime": {
+            "size": {
+              "width": 1200,
+              "height": 270.91332838316305
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime2017": {
+            "size": {
+              "width": 1200,
+              "height": 269.4440201902979
+            },
+            "pos": {
+              "x": 0,
+              "y": 270.91332838316305
+            }
+          },
+          "districtsFilter": {
+            "size": {
+              "width": 308.5714285714286,
+              "height": 411.42857142857144
+            },
+            "pos": {
+              "x": 0,
+              "y": 540.357348573461
+            }
+          },
+          "bars-Weapons": {
+            "size": {
+              "width": 480,
+              "height": 411.42857142857144
+            },
+            "pos": {
+              "x": 308.5714285714286,
+              "y": 540.357348573461
+            }
+          },
+          "bars-Inside-Outside": {
+            "size": {
+              "width": 411.42857142857144,
+              "height": 411.42857142857144
+            },
+            "pos": {
+              "x": 788.5714285714287,
+              "y": 540.357348573461
+            }
+          },
+          "map": {
+            "size": {
+              "width": 1200,
+              "height": 878.2140799979677
+            },
+            "pos": {
+              "x": 0,
+              "y": 951.7859200020324
+            }
+          }
+        }
+      },
+    "auto:future": {
+        "laptop": {
+          "map": {
+            "size": {
+              "width": 624.9686984880755,
+              "height": 789
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "bars-Weapons": {
+            "size": {
+              "width": 443.00868909988736,
+              "height": 242.61127910290642
+            },
+            "pos": {
+              "x": 624.9686984880755,
+              "y": 0
+            }
+          },
+          "districtsFilter": {
+            "size": {
+              "width": 443.00868909988736,
+              "height": 324.88437634714995
+            },
+            "pos": {
+              "x": 624.9686984880755,
+              "y": 242.61127910290642
+            }
+          },
+          "bars-Inside-Outside": {
+            "size": {
+              "width": 443.00868909988736,
+              "height": 221.50434454994368
+            },
+            "pos": {
+              "x": 624.9686984880755,
+              "y": 567.4956554500563
+            }
+          },
+          "bars-CrimeTypes": {
+            "size": {
+              "width": 532.0226124120373,
+              "height": 522.9886937939814
+            },
+            "pos": {
+              "x": 1067.9773875879628,
+              "y": 0
+            }
+          },
+          "bars-District": {
+            "size": {
+              "width": 532.0226124120373,
+              "height": 266.0113062060187
+            },
+            "pos": {
+              "x": 1067.9773875879628,
+              "y": 522.9886937939814
+            }
+          }
+        },
+        "large-display": {
+          "lines-CrimeTypeOverTime": {
+            "size": {
+              "width": 1920,
+              "height": 259.67286174808976
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime2017": {
+            "size": {
+              "width": 1920,
+              "height": 259.6126731834262
+            },
+            "pos": {
+              "x": 0,
+              "y": 259.67286174808976
+            }
+          },
+          "lines-DistrictsOverTime": {
+            "size": {
+              "width": 1920,
+              "height": 224.88329494725
+            },
+            "pos": {
+              "x": 0,
+              "y": 519.2855349315159
+            }
+          },
+          "lines-SelectedDistrictsOverTime2017": {
+            "size": {
+              "width": 1920,
+              "height": 224.8311701212341
+            },
+            "pos": {
+              "x": 0,
+              "y": 744.1688298787659
+            }
+          }
+        }
+      },
+    "auto:mobile": {
+        "laptop": {
+          "lines-DistrictsOverTime": {
+            "size": {
+              "width": 1249.842055352994,
+              "height": 173.528732278672
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedDistrictsOverTime2017": {
+            "size": {
+              "width": 1249.842055352994,
+              "height": 173.4885107273962
+            },
+            "pos": {
+              "x": 0,
+              "y": 173.528732278672
+            }
+          },
+          "map": {
+            "size": {
+              "width": 642.1157644863379,
+              "height": 441.98275699393184
+            },
+            "pos": {
+              "x": 0,
+              "y": 347.0172430060682
+            }
+          },
+          "districtsFilter": {
+            "size": {
+              "width": 165.74353387272444,
+              "height": 441.98275699393184
+            },
+            "pos": {
+              "x": 642.1157644863379,
+              "y": 347.0172430060682
+            }
+          },
+          "bars-Weapons": {
+            "size": {
+              "width": 350.15794464700593,
+              "height": 337.6523037667557
+            },
+            "pos": {
+              "x": 1249.842055352994,
+              "y": 225.67384811662214
+            }
+          },
+          "bars-Inside-Outside": {
+            "size": {
+              "width": 441.98275699393184,
+              "height": 441.98275699393184
+            },
+            "pos": {
+              "x": 807.8592983590623,
+              "y": 347.0172430060682
+            }
+          }
+        },
+        "tablet": {
+          "lines-CrimeTypeOverTime": {
+            "size": {
+              "width": 1024,
+              "height": 299.99999999999994
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime2017": {
+            "size": {
+              "width": 1024,
+              "height": 300.0000000000001
+            },
+            "pos": {
+              "x": 0,
+              "y": 299.99999999999994
+            }
+          }
+        },
+        "phone": {
+          "bars-CrimeTypes": {
+            "size": {
+              "width": 364.06498917868464,
+              "height": 280
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "bars-District": {
+            "size": {
+              "width": 327.93501082131525,
+              "height": 280
+            },
+            "pos": {
+              "x": 364.06498917868464,
+              "y": 0
+            }
+          }
+        }
+      },
+    "empty:traditional": {
+        "desktop-1": {},
+        "desktop-2": {}
+      },
+    "empty:future": {
+        "laptop": {},
+        "large-display": {}
+      },
+    "empty:mobile": {
+      "phone": {},
+      "tablet": {},
+      "laptop": {}
+    },
+    "m0:traditional": {
+      "desktop-2": {
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 260
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 260
+          },
+          "pos": {
+            "x": 0,
+            "y": 260
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 230
+          },
+          "pos": {
+            "x": 0,
+            "y": 520
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 230
+          },
+          "pos": {
+            "x": 0,
+            "y": 750
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 1200,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 980
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 1200,
+            "height": 450
+          },
+          "pos": {
+            "x": 0,
+            "y": 1380
+          }
+        }
+      },
+      "desktop-1": {
+        "bars-Weapons": {
+          "size": {
+            "width": 635,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 635,
+            "height": 280
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 635,
+            "height": 310
+          },
+          "pos": {
+            "x": 0,
+            "y": 680
+          }
+        },
+        "map": {
+          "size": {
+            "width": 1285,
+            "height": 990
+          },
+          "pos": {
+            "x": 635,
+            "y": 0
+          }
+        }
+      }
+    },
+    "m0:mobile": {
+      "laptop": {
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1035,
+            "height": 225
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1035,
+            "height": 225
+          },
+          "pos": {
+            "x": 0,
+            "y": 225
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1035,
+            "height": 170
+          },
+          "pos": {
+            "x": 0,
+            "y": 450
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1035,
+            "height": 170
+          },
+          "pos": {
+            "x": 0,
+            "y": 620
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 565,
+            "height": 340
+          },
+          "pos": {
+            "x": 1035,
+            "y": 450
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 565,
+            "height": 450
+          },
+          "pos": {
+            "x": 1035,
+            "y": 0
+          }
+        }
+      },
+      "tablet": {
+        "map": {
+          "size": {
+            "width": 670,
+            "height": 600
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 354,
+            "height": 250
+          },
+          "pos": {
+            "x": 670,
+            "y": 350
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 354,
+            "height": 350
+          },
+          "pos": {
+            "x": 670,
+            "y": 0
+          }
+        }
+      },
+      "phone": {
+        "bars-Weapons": {
+          "size": {
+            "width": 692,
+            "height": 280
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      }
+    },
+    "m0:future": {
+        "large-display": {
+          "lines-CrimeTypeOverTime": {
+            "size": {
+              "width": 1310,
+              "height": 270
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "lines-SelectedCrimeTypesOverTime2017": {
+            "size": {
+              "width": 1310,
+              "height": 270
+            },
+            "pos": {
+              "x": 0,
+              "y": 270
+            }
+          },
+          "lines-DistrictsOverTime": {
+            "size": {
+              "width": 1310,
+              "height": 215
+            },
+            "pos": {
+              "x": 0,
+              "y": 540
+            }
+          },
+          "lines-SelectedDistrictsOverTime2017": {
+            "size": {
+              "width": 1310,
+              "height": 215
+            },
+            "pos": {
+              "x": 0,
+              "y": 755
+            }
+          },
+          "bars-CrimeTypes": {
+            "size": {
+              "width": 610,
+              "height": 325
+            },
+            "pos": {
+              "x": 1310,
+              "y": 0
+            }
+          },
+          "bars-District": {
+            "size": {
+              "width": 610,
+              "height": 300
+            },
+            "pos": {
+              "x": 1310,
+              "y": 325
+            }
+          }
+        },
+        "laptop": {
+          "map": {
+            "size": {
+              "width": 1075,
+              "height": 789
+            },
+            "pos": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          "bars-Weapons": {
+            "size": {
+              "width": 515,
+              "height": 290
+            },
+            "pos": {
+              "x": 1075,
+              "y": 0
+            }
+          },
+          "bars-Inside-Outside": {
+            "size": {
+              "width": 515,
+              "height": 200
+            },
+            "pos": {
+              "x": 1075,
+              "y": 290
+            }
+          },
+          "districtsFilter": {
+            "size": {
+              "width": 515,
+              "height": 300
+            },
+            "pos": {
+              "x": 1075,
+              "y": 490
+            }
+          }
+        }
+      },
+    "p0:mobile": {
+      "tablet": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 900,
+            "height": 280
+          },
+          "pos": {
+            "x": 40,
+            "y": 310
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 900,
+            "height": 300
+          },
+          "pos": {
+            "x": 40,
+            "y": 10
+          }
+        }
+      },
+      "laptop": {
+        "map": {
+          "size": {
+            "width": 750,
+            "height": 789
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 425,
+            "height": 280
+          },
+          "pos": {
+            "x": 750,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 425,
+            "height": 280
+          },
+          "pos": {
+            "x": 1175,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 850,
+            "height": 150
+          },
+          "pos": {
+            "x": 750,
+            "y": 530
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 850,
+            "height": 110
+          },
+          "pos": {
+            "x": 750,
+            "y": 680
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 850,
+            "height": 150
+          },
+          "pos": {
+            "x": 750,
+            "y": 380
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 850,
+            "height": 100
+          },
+          "pos": {
+            "x": 750,
+            "y": 280
+          }
+        }
+      },
+      "phone": {
+        "districtsFilter": {
+          "size": {
+            "width": 400,
+            "height": 280
+          },
+          "pos": {
+            "x": 100,
+            "y": 0
+          }
+        }
+      }
+    },
+    "p0:future": {
+      "laptop": {
+        "districtsFilter": {
+          "size": {
+            "width": 400,
+            "height": 500
+          },
+          "pos": {
+            "x": 100,
+            "y": 150
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 870,
+            "height": 395
+          },
+          "pos": {
+            "x": 500,
+            "y": 0
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 1000,
+            "height": 395
+          },
+          "pos": {
+            "x": 500,
+            "y": 395
+          }
+        }
+      },
+      "large-display": {
+        "bars-Weapons": {
+          "size": {
+            "width": 700,
+            "height": 250
+          },
+          "pos": {
+            "x": 500,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 500,
+            "height": 250
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 200
+          },
+          "pos": {
+            "x": 920,
+            "y": 250
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 150
+          },
+          "pos": {
+            "x": 920,
+            "y": 450
+          }
+        },
+        "map": {
+          "size": {
+            "width": 920,
+            "height": 720
+          },
+          "pos": {
+            "x": 0,
+            "y": 250
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 200
+          },
+          "pos": {
+            "x": 920,
+            "y": 620
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 150
+          },
+          "pos": {
+            "x": 920,
+            "y": 820
+          }
+        }
+      }
+    },
+    "p0:traditional": {
+      "desktop-2": {
+        "districtsFilter": {
+          "size": {
+            "width": 399.9732495151475,
+            "height": 599.9955415858578
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "map": {
+          "size": {
+            "width": 1199.9910831717157,
+            "height": 1229.987293519695
+          },
+          "pos": {
+            "x": 0,
+            "y": 600.0052430950311
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 799.9821663434316,
+            "height": 249.99219777525133
+          },
+          "pos": {
+            "x": 400.00349539668736,
+            "y": 0
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 799.9821663434316,
+            "height": 350.00334381060657
+          },
+          "pos": {
+            "x": 400.00349539668736,
+            "y": 250.0021846229296
+          }
+        }
+      },
+      "desktop-1": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 819.9884824729246,
+            "height": 485.0023220820717
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 819.9884824729246,
+            "height": 485.0023220820717
+          },
+          "pos": {
+            "x": 0,
+            "y": 485.0028927569616
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1099.9758503464548,
+            "height": 219.99517006929094
+          },
+          "pos": {
+            "x": 820.0050320447326,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1099.9758503464548,
+            "height": 259.9780795452435
+          },
+          "pos": {
+            "x": 820.0050320447326,
+            "y": 450.00226040757184
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1099.9758503464548,
+            "height": 259.9780795452435
+          },
+          "pos": {
+            "x": 820.0050320447326,
+            "y": 710.0040229607475
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1099.9758503464548,
+            "height": 219.99517006929094
+          },
+          "pos": {
+            "x": 820.0050320447326,
+            "y": 220.00133335810224
+          }
+        }
+      }
+    },
+    "p1:traditional": {
+      "desktop-1": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 960,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 75
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 960,
+            "height": 400
+          },
+          "pos": {
+            "x": 960,
+            "y": 75
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 960,
+            "height": 220
+          },
+          "pos": {
+            "x": 0,
+            "y": 475
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 960,
+            "height": 220
+          },
+          "pos": {
+            "x": 0,
+            "y": 695
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 960,
+            "height": 220
+          },
+          "pos": {
+            "x": 960,
+            "y": 475
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 960,
+            "height": 220
+          },
+          "pos": {
+            "x": 960,
+            "y": 695
+          }
+        }
+      },
+      "desktop-2": {
+        "map": {
+          "size": {
+            "width": 1200,
+            "height": 1000
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 900,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 1000
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 900,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 1400
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "pos": {
+            "x": 900,
+            "y": 1000
+          }
+        }
+      }
+    },
+    "p1:future": {
+      "large-display": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 400,
+            "height": 540
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1520,
+            "height": 270
+          },
+          "pos": {
+            "x": 400,
+            "y": 0
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1520,
+            "height": 270
+          },
+          "pos": {
+            "x": 400,
+            "y": 270
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 400,
+            "height": 430
+          },
+          "pos": {
+            "x": 0,
+            "y": 540
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1520,
+            "height": 215
+          },
+          "pos": {
+            "x": 400,
+            "y": 540
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1520,
+            "height": 215
+          },
+          "pos": {
+            "x": 400,
+            "y": 755
+          }
+        }
+      },
+      "laptop": {
+        "map": {
+          "size": {
+            "width": 900,
+            "height": 789
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 700,
+            "height": 350
+          },
+          "pos": {
+            "x": 900,
+            "y": 80
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 550,
+            "height": 300
+          },
+          "pos": {
+            "x": 1050,
+            "y": 420
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 150,
+            "height": 300
+          },
+          "pos": {
+            "x": 900,
+            "y": 420
+          }
+        }
+      }
+    },
+    "p1:mobile": {
+      "laptop": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 800,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 800,
+            "height": 400
+          },
+          "pos": {
+            "x": 800,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 800,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 800,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 595
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 800,
+            "height": 195
+          },
+          "pos": {
+            "x": 800,
+            "y": 400
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 800,
+            "height": 195
+          },
+          "pos": {
+            "x": 800,
+            "y": 595
+          }
+        }
+      },
+      "phone": {
+        "districtsFilter": {
+          "size": {
+            "width": 400,
+            "height": 279
+          },
+          "pos": {
+            "x": 30,
+            "y": 0
+          }
+        }
+      },
+      "tablet": {
+        "map": {
+          "size": {
+            "width": 600,
+            "height": 600
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 424,
+            "height": 330
+          },
+          "pos": {
+            "x": 600,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 424,
+            "height": 270
+          },
+          "pos": {
+            "x": 600,
+            "y": 330
+          }
+        }
+      }
+    },
+    "p2:traditional": {
+      "desktop-1": {
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 960,
+            "height": 350
+          },
+          "pos": {
+            "x": 960,
+            "y": 470
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 960,
+            "height": 400
+          },
+          "pos": {
+            "x": 960,
+            "y": 70
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 960,
+            "height": 350
+          },
+          "pos": {
+            "x": 0,
+            "y": 470
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 960,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 70
+          }
+        }
+      },
+      "desktop-2": {
+        "map": {
+          "size": {
+            "width": 1200,
+            "height": 1100
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "pos": {
+            "x": 900,
+            "y": 800
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 500,
+            "height": 280
+          },
+          "pos": {
+            "x": 700,
+            "y": 1200
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 500,
+            "height": 350
+          },
+          "pos": {
+            "x": 700,
+            "y": 1480
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 700,
+            "height": 350
+          },
+          "pos": {
+            "x": 0,
+            "y": 1100
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 700,
+            "height": 380
+          },
+          "pos": {
+            "x": 0,
+            "y": 1450
+          }
+        }
+      }
+    },
+    "p2:future": {
+      "large-display": {
+        "map": {
+          "size": {
+            "width": 1000,
+            "height": 970
+          },
+          "pos": {
+            "x": 920,
+            "y": 0
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "pos": {
+            "x": 620,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 620,
+            "height": 160
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 620,
+            "height": 240
+          },
+          "pos": {
+            "x": 0,
+            "y": 160
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 920,
+            "height": 275
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 920,
+            "height": 275
+          },
+          "pos": {
+            "x": 0,
+            "y": 675
+          }
+        }
+      },
+      "laptop": {
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1600,
+            "height": 210
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1600,
+            "height": 210
+          },
+          "pos": {
+            "x": 0,
+            "y": 210
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1600,
+            "height": 190
+          },
+          "pos": {
+            "x": 0,
+            "y": 410
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1600,
+            "height": 190
+          },
+          "pos": {
+            "x": 0,
+            "y": 600
+          }
+        }
+      }
+    },
+    "p2:mobile": {
+      "laptop": {
+        "districtsFilter": {
+          "size": {
+            "width": 350,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 45
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 625,
+            "height": 400
+          },
+          "pos": {
+            "x": 350,
+            "y": 45
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 625,
+            "height": 400
+          },
+          "pos": {
+            "x": 975,
+            "y": 45
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 800,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 445
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 800,
+            "height": 300
+          },
+          "pos": {
+            "x": 800,
+            "y": 445
+          }
+        }
+      },
+      "phone": {
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 692,
+            "height": 140
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 692,
+            "height": 140
+          },
+          "pos": {
+            "x": 0,
+            "y": 140
+          }
+        }
+      },
+      "tablet": {
+        "map": {
+          "size": {
+            "width": 600,
+            "height": 600
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 424,
+            "height": 300
+          },
+          "pos": {
+            "x": 600,
+            "y": 30
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 424,
+            "height": 250
+          },
+          "pos": {
+            "x": 600,
+            "y": 330
+          }
+        }
+      }
+    },
+    "p3:traditional": {
+      "desktop-1": {
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1920,
+            "height": 250
+          },
+          "pos": {
+            "x": 0,
+            "y": 250
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1920,
+            "height": 245
+          },
+          "pos": {
+            "x": 0,
+            "y": 745
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1920,
+            "height": 250
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1920,
+            "height": 245
+          },
+          "pos": {
+            "x": 0,
+            "y": 500
+          }
+        }
+      },
+      "desktop-2": {
+        "map": {
+          "size": {
+            "width": 1200,
+            "height": 1000
+          },
+          "pos": {
+            "x": 0,
+            "y": 830
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 275,
+            "height": 430
+          },
+          "pos": {
+            "x": 925,
+            "y": 400
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 900,
+            "height": 400
+          },
+          "pos": {
+            "x": 300,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 375,
+            "height": 430
+          },
+          "pos": {
+            "x": 550,
+            "y": 400
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 550,
+            "height": 430
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        }
+      }
+    },
+    "p3:future": {
+      "large-display": {
+        "map": {
+          "size": {
+            "width": 920,
+            "height": 969
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 240
+          },
+          "pos": {
+            "x": 920,
+            "y": 480
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 240
+          },
+          "pos": {
+            "x": 920,
+            "y": 240
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 245
+          },
+          "pos": {
+            "x": 920,
+            "y": 720
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 245
+          },
+          "pos": {
+            "x": 920,
+            "y": 0
+          }
+        }
+      },
+      "laptop": {
+        "districtsFilter": {
+          "size": {
+            "width": 550,
+            "height": 789
+          },
+          "pos": {
+            "x": 1050,
+            "y": 0
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 1050,
+            "height": 450
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 250,
+            "height": 339
+          },
+          "pos": {
+            "x": 800,
+            "y": 450
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 300,
+            "height": 339
+          },
+          "pos": {
+            "x": 500,
+            "y": 450
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 500,
+            "height": 339
+          },
+          "pos": {
+            "x": 0,
+            "y": 450
+          }
+        }
+      }
+    },
+    "p3:mobile": {
+      "laptop": {
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1600,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1600,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1600,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 395
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1600,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 595
+          }
+        }
+      },
+      "tablet": {
+        "bars-Weapons": {
+          "size": {
+            "width": 290,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 1024,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 300
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 350,
+            "height": 300
+          },
+          "pos": {
+            "x": 290,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 210,
+            "height": 300
+          },
+          "pos": {
+            "x": 640,
+            "y": 0
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 174,
+            "height": 300
+          },
+          "pos": {
+            "x": 850,
+            "y": 0
+          }
+        }
+      },
+      "phone": {
+        "map": {
+          "size": {
+            "width": 692,
+            "height": 280
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      }
+    },
+    "p4:future": {
+          "laptop": {
+            "districtsFilter": {
+              "size": {
+                "width": 350,
+                "height": 400
+              },
+              "pos": {
+                "x": 0,
+                "y": 0
+              }
+            },
+            "bars-Weapons": {
+              "size": {
+                "width": 700,
+                "height": 390
+              },
+              "pos": {
+                "x": 0,
+                "y": 400
+              }
+            },
+            "bars-CrimeTypes": {
+              "size": {
+                "width": 900,
+                "height": 400
+              },
+              "pos": {
+                "x": 350,
+                "y": 0
+              }
+            },
+            "bars-District": {
+              "size": {
+                "width": 900,
+                "height": 390
+              },
+              "pos": {
+                "x": 700,
+                "y": 400
+              }
+            },
+            "bars-Inside-Outside": {
+              "size": {
+                "width": 350,
+                "height": 400
+              },
+              "pos": {
+                "x": 1250,
+                "y": 0
+              }
+            }
+          },
+          "large-display": {
+            "map": {
+              "size": {
+                "width": 950,
+                "height": 969
+              },
+              "pos": {
+                "x": 0,
+                "y": 0
+              }
+            },
+            "lines-DistrictsOverTime": {
+              "size": {
+                "width": 970,
+                "height": 250
+              },
+              "pos": {
+                "x": 950,
+                "y": 470
+              }
+            },
+            "lines-SelectedDistrictsOverTime2017": {
+              "size": {
+                "width": 970,
+                "height": 250
+              },
+              "pos": {
+                "x": 950,
+                "y": 720
+              }
+            },
+            "lines-CrimeTypeOverTime": {
+              "size": {
+                "width": 970,
+                "height": 235
+              },
+              "pos": {
+                "x": 950,
+                "y": 0
+              }
+            },
+            "lines-SelectedCrimeTypesOverTime2017": {
+              "size": {
+                "width": 970,
+                "height": 235
+              },
+              "pos": {
+                "x": 950,
+                "y": 235
+              }
+            }
+          }
+    },
+    "p4:traditional": {
+      "desktop-2": {
+        "districtsFilter": {
+          "size": {
+            "width": 350,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "map": {
+          "size": {
+            "width": 1200,
+            "height": 950
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 850,
+            "height": 400
+          },
+          "pos": {
+            "x": 350,
+            "y": 0
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 240
+          },
+          "pos": {
+            "x": 0,
+            "y": 1350
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 240
+          },
+          "pos": {
+            "x": 0,
+            "y": 1590
+          }
+        }
+      },
+      "desktop-1": {
+        "bars-Weapons": {
+          "size": {
+            "width": 720,
+            "height": 450
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 270
+          },
+          "pos": {
+            "x": 720,
+            "y": 450
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 270
+          },
+          "pos": {
+            "x": 720,
+            "y": 720
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 1200,
+            "height": 450
+          },
+          "pos": {
+            "x": 720,
+            "y": 0
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 720,
+            "height": 540
+          },
+          "pos": {
+            "x": 0,
+            "y": 450
+          }
+        }
+      }
+    },
+    "p4:mobile": {
+      "phone": {
+        "bars-Weapons": {
+          "size": {
+            "width": 692,
+            "height": 280
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      },
+      "tablet": {
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1024,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 512,
+            "height": 200
+          },
+          "pos": {
+            "x": 512,
+            "y": 400
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1024,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      },
+      "laptop": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 800,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "map": {
+          "size": {
+            "width": 500,
+            "height": 500
+          },
+          "pos": {
+            "x": 1100,
+            "y": 0
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1100,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 595
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 400
+          },
+          "pos": {
+            "x": 800,
+            "y": 0
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 500,
+            "height": 290
+          },
+          "pos": {
+            "x": 1100,
+            "y": 500
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1100,
+            "height": 195
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        }
+      }
+    },
+    "p5:traditional": {
+          "desktop-1": {
+            "bars-CrimeTypes": {
+              "size": {
+                "width": 930,
+                "height": 465
+              },
+              "pos": {
+                "x": 20,
+                "y": 20
+              }
+            },
+            "bars-Weapons": {
+              "size": {
+                "width": 930,
+                "height": 465
+              },
+              "pos": {
+                "x": 970,
+                "y": 20
+              }
+            },
+            "bars-District": {
+              "size": {
+                "width": 930,
+                "height": 465
+              },
+              "pos": {
+                "x": 20,
+                "y": 505
+              }
+            },
+            "bars-Inside-Outside": {
+              "size": {
+                "width": 930,
+                "height": 465
+              },
+              "pos": {
+                "x": 970,
+                "y": 505
+              }
+            }
+          },
+          "desktop-2": {
+            "lines-CrimeTypeOverTime": {
+              "size": {
+                "width": 1160,
+                "height": 230
+              },
+              "pos": {
+                "x": 20,
+                "y": 20
+              }
+            },
+            "lines-DistrictsOverTime": {
+              "size": {
+                "width": 1160,
+                "height": 230
+              },
+              "pos": {
+                "x": 20,
+                "y": 270
+              }
+            },
+            "lines-SelectedCrimeTypesOverTime2017": {
+              "size": {
+                "width": 1160,
+                "height": 230
+              },
+              "pos": {
+                "x": 20,
+                "y": 520
+              }
+            },
+            "lines-SelectedDistrictsOverTime2017": {
+              "size": {
+                "width": 1160,
+                "height": 230
+              },
+              "pos": {
+                "x": 20,
+                "y": 770
+              }
+            },
+            "districtsFilter": {
+              "size": {
+                "width": 300,
+                "height": 400
+              },
+              "pos": {
+                "x": 20,
+                "y": 1020
+              }
+            },
+            "map": {
+              "size": {
+                "width": 840,
+                "height": 790
+              },
+              "pos": {
+                "x": 340,
+                "y": 1020
+              }
+            }
+          }
+        },
+    "p5:future": {
+      "laptop": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 770,
+            "height": 365
+          },
+          "pos": {
+            "x": 20,
+            "y": 20
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 770,
+            "height": 365
+          },
+          "pos": {
+            "x": 810,
+            "y": 20
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 770,
+            "height": 365
+          },
+          "pos": {
+            "x": 20,
+            "y": 405
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 770,
+            "height": 365
+          },
+          "pos": {
+            "x": 810,
+            "y": 405
+          }
+        }
+      },
+      "large-display": {
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 210
+          },
+          "pos": {
+            "x": 20,
+            "y": 20
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1200,
+            "height": 210
+          },
+          "pos": {
+            "x": 20,
+            "y": 250
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 350
+          },
+          "pos": {
+            "x": 1420,
+            "y": 20
+          }
+        },
+        "map": {
+          "size": {
+            "width": 660,
+            "height": 530
+          },
+          "pos": {
+            "x": 1240,
+            "y": 390
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 210
+          },
+          "pos": {
+            "x": 20,
+            "y": 480
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1200,
+            "height": 210
+          },
+          "pos": {
+            "x": 20,
+            "y": 710
+          }
+        }
+      }
+    },
+    "p5:mobile": {
+      "laptop": {
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 970,
+            "height": 350
+          },
+          "pos": {
+            "x": 20,
+            "y": 20
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 740,
+            "height": 380
+          },
+          "pos": {
+            "x": 20,
+            "y": 390
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 800,
+            "height": 380
+          },
+          "pos": {
+            "x": 780,
+            "y": 390
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 570,
+            "height": 350
+          },
+          "pos": {
+            "x": 1010,
+            "y": 20
+          }
+        }
+      },
+      "phone": {
+        "bars-District": {
+          "size": {
+            "width": 460,
+            "height": 160
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 692,
+            "height": 120
+          },
+          "pos": {
+            "x": 0,
+            "y": 160
+          }
+        },
+        "map": {
+          "size": {
+            "width": 232,
+            "height": 160
+          },
+          "pos": {
+            "x": 460,
+            "y": 0
+          }
+        }
+      },
+      "tablet": {
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1024,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1024,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1024,
+            "height": 200
+          },
+          "pos": {
+            "x": 0,
+            "y": 400
+          }
+        }
+      }
+    },
+    "p6:traditional": {
+      "desktop-1": {
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1920,
+            "height": 240
+          },
+          "pos": {
+            "x": 0,
+            "y": 240
+          }
+        },
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1920,
+            "height": 235
+          },
+          "pos": {
+            "x": 0,
+            "y": 755
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1920,
+            "height": 240
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1920,
+            "height": 235
+          },
+          "pos": {
+            "x": 0,
+            "y": 515
+          }
+        }
+      },
+      "desktop-2": {
+        "map": {
+          "size": {
+            "width": 850,
+            "height": 730
+          },
+          "pos": {
+            "x": 350,
+            "y": 650
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 350,
+            "height": 400
+          },
+          "pos": {
+            "x": 0,
+            "y": 650
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 350,
+            "height": 150
+          },
+          "pos": {
+            "x": 0,
+            "y": 1050
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 900,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 300
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 350,
+            "height": 180
+          },
+          "pos": {
+            "x": 0,
+            "y": 1200
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 600,
+            "height": 300
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      }
+    },
+    "p6:future": {
+      "large-display": {
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1320,
+            "height": 220
+          },
+          "pos": {
+            "x": 600,
+            "y": 509
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1320,
+            "height": 220
+          },
+          "pos": {
+            "x": 600,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1320,
+            "height": 240
+          },
+          "pos": {
+            "x": 600,
+            "y": 220
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1320,
+            "height": 240
+          },
+          "pos": {
+            "x": 600,
+            "y": 729
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 500,
+            "height": 230
+          },
+          "pos": {
+            "x": 100,
+            "y": 115
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 600,
+            "height": 320
+          },
+          "pos": {
+            "x": 0,
+            "y": 579
+          }
+        }
+      },
+      "laptop": {
+        "bars-Weapons": {
+          "size": {
+            "width": 300,
+            "height": 220
+          },
+          "pos": {
+            "x": 0,
+            "y": 569
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 300,
+            "height": 160
+          },
+          "pos": {
+            "x": 0,
+            "y": 409
+          }
+        },
+        "districtsFilter": {
+          "size": {
+            "width": 300,
+            "height": 409
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "map": {
+          "size": {
+            "width": 1300,
+            "height": 789
+          },
+          "pos": {
+            "x": 300,
+            "y": 0
+          }
+        }
+      }
+    },
+    "p6:mobile": {
+      "laptop": {
+        "lines-SelectedDistrictsOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 180
+          },
+          "pos": {
+            "x": 600,
+            "y": 409
+          }
+        },
+        "lines-DistrictsOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 180
+          },
+          "pos": {
+            "x": 600,
+            "y": 0
+          }
+        },
+        "lines-CrimeTypeOverTime": {
+          "size": {
+            "width": 1000,
+            "height": 200
+          },
+          "pos": {
+            "x": 600,
+            "y": 180
+          }
+        },
+        "lines-SelectedCrimeTypesOverTime2017": {
+          "size": {
+            "width": 1000,
+            "height": 200
+          },
+          "pos": {
+            "x": 600,
+            "y": 589
+          }
+        },
+        "bars-District": {
+          "size": {
+            "width": 500,
+            "height": 230
+          },
+          "pos": {
+            "x": 100,
+            "y": 75
+          }
+        },
+        "bars-CrimeTypes": {
+          "size": {
+            "width": 600,
+            "height": 320
+          },
+          "pos": {
+            "x": 0,
+            "y": 439
+          }
+        }
+      },
+      "tablet": {
+        "map": {
+          "size": {
+            "width": 1024,
+            "height": 600
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      },
+      "phone": {
+        "districtsFilter": {
+          "size": {
+            "width": 240,
+            "height": 279
+          },
+          "pos": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "bars-Weapons": {
+          "size": {
+            "width": 452,
+            "height": 160
+          },
+          "pos": {
+            "x": 240,
+            "y": 120
+          }
+        },
+        "bars-Inside-Outside": {
+          "size": {
+            "width": 452,
+            "height": 120
+          },
+          "pos": {
+            "x": 240,
+            "y": 0
+          }
+        }
+      }
+    }
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" data-id="L7buJqfp" name="Study Overwrites" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" id="vistributeStudyOverwrites" class="viscontroller">vc = {
+  data: 'vistributeStudyOverwrites-data',
+  init: function() {    
+    this.updateOverwrites = () =&gt; {
+      
+      if (this.data.studyMode &amp;&amp; !document.body.classList.contains("study")) {
+        document.body.classList.add("study");
+      } else if (!this.data.studyMode &amp;&amp; document.body.classList.contains("study")) {
+        document.body.classList.remove("study");
+      }
+    };
+    
+    window.addEventListener("codestrateloaded", () =&gt; {
+      if (this.data &amp;&amp; this.data.studyMode)
+        this.updateOverwrites();
+    });
+  },
+  update: function(source) {
+    if (this.data &amp;&amp; document.querySelector("#vistributeQuickMenu")) {
+      this.updateOverwrites();
+    }
+  }
+};</pre></div><div class="paragraph data-paragraph collapsed" data-id="LXPMXECw" name="Study Overwrites Data"><pre data-type="content" type="application/json" id="vistributeStudyOverwrites-data" class="visdata">{
+  "config": {},
+  "data": {
+    "studyMode": false
+  }
+}</pre></div><div class="paragraph style-paragraph collapsed" data-id="6njCdCBf" name="Study Overwrites Styles"><style data-type="content" type="text/css" codemirror="true" id="vistributeStudyOverwrites-styles">body.study #vistributeControlPanel .vistribute.box {
+  display: none;
+}
+
+body.study #vistributeControlPanel .indicators .spaceReq,
+body.study #vistributeControlPanel .indicators .group,
+body.study #vistributeControlPanel .view-indicators .spaceReq,
+body.study #vistributeControlPanel .view-indicators .group,
+body.study #vistributeQuickMenu .view-indicators .spaceReq,
+body.study #vistributeQuickMenu .view-indicators .group,
+body.study #vistributeQuickMenu #vistributeMinimap {
+  display: none !important;
+}</style></div><div class="paragraph code-paragraph collapsed" data-id="8Gjg2rVx" name="Study Manager" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript" id="vistributeStudyManager">var vistribute = vistribute || {};
+
+window.addEventListener("codestrateloaded", () =&gt; {
+  (function (defNs) {
+    defNs.logDistr = Vistrate.getOutput('vistributeDistributionLogger').log;
+    defNs.loadDistr = (distr) =&gt; {
+      Vistrate.getOutput('vistributeDistributionLogger').log();
+      Vistrate.getOutput('vistributeDistributionStorage').getDistribution(distr);
+    };
+    defNs.loadDoc = Vistrate.getOutput('signaling').switchDocument;
+  })(vistribute);
+
+  (function (window, ns) {
+    window.vistribute = ns;
+  })(window, vistribute);
+});</pre></div></div>

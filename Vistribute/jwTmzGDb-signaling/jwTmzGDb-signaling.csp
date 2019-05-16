@@ -1,0 +1,50 @@
+<div class="section section-visible collapsed" name="signaling" data-type="package" data-id="jwTmzGDb"><div class="paragraph body-paragraph collapsed" name="Documentation" data-id="nrDfyzhk"><div data-type="content" type="text/html" codemirror="true" contenteditable="true" class="section-documentation"><h2>Description</h2>
+<div>Small component allowing to redirect all connected clients to another webstrates document</div></div></div><div class="paragraph data-paragraph collapsed" name="Properties" data-id="eT7EeFsK"><pre data-type="content" type="application/json" class="section-properties">{
+  "version": "1.0",
+  "description": "Small component allowing to redirect all connected clients to another webstrates document.",
+  "dependencies": [
+    {
+			"id": "kTKppb2i",
+			"name": "Vistrate",
+			"optional": false
+		}
+  ],
+  "changelog": {
+    "1.0": "Initial version."
+  }
+}</pre></div><div class="paragraph code-paragraph collapsed" name="signaling" data-id="cvcvDwFX" run-on-load="true" last-execution-state="success"><pre data-type="content" type="text/javascript-viscontroller" class="viscontroller" id="signaling">vc = {
+	template: 'none',
+	data: 'signaling-data',
+	src: [],
+	props: [],
+	init: function() {
+    this.switchDocument = (slug) =&gt; {
+      webstrate.signal({
+        cmd: "switchDocument",
+        slug
+      }, webstrate.clients);
+      location.href = "https://" + location.hostname + "/" + slug +"/";
+    };
+
+    webstrate.on("signal", (msg, sender) =&gt; {
+      let { cmd, slug } = msg;
+      if (cmd === "switchDocument") {
+        setTimeout(() =&gt; {
+          location.href = "https://" + location.hostname + "/" + slug +"/";
+        }, 5000);
+      }
+    });
+	},
+	destroy: function() {
+
+	},
+	update: function(source) {
+	
+	},
+};</pre></div><div class="paragraph data-paragraph collapsed" name="signaling data" data-id="t4enHvmk"><pre data-type="content" type="application/json" id="signaling-data" class="visdata">{
+  "config": {
+    "src": {},
+    "view": "signaling-view"
+  },
+  "data": {}
+}</pre></div></div>
