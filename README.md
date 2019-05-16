@@ -3,7 +3,7 @@ Vistribute is a framework for automatically distributing visualizations across d
 
 >Tom Horak, Andreas Mathisen, Clemens N. Klokmose, Raimund Dachselt, and Niklas Elmqvist. 2019. Vistribute: Distributing Interactive Visualizations in Dynamic Multi-Device Setups. In Proceedings of the 2019 CHI Conference on Human Factors in Computing Systems (CHI '19). ACM, New York, NY, USA, Paper 616, 13 pages. DOI: https://doi.org/10.1145/3290605.3300846
 
-For a quick overview, see our project page at [imld.de/vistribute](https://imld.de/vistribute) or read our Medium blog post.
+For a quick overview, see our project page at [imld.de/vistribute](https://imld.de/vistribute) or read [our Medium blog post](https://medium.com/@tomhorak/automatically-arranging-charts-with-vistribute-e99125b59d13?source=friends_link&sk=efbc281f3b723a56c532b03b71edbbe3).
 
 ## Vistribute System
 The Vistribute system is an example implemenation of our core ideas. It builds upon [Vistrates](http://vistrates.org) (a visualization component model) as well as [Codestrates](http://codestrates.org)/[Webstrates](https://webstrates.net). Our implementation automatically analyzes all existing Vistrates visualization components as well as all devices connected to the webstrates document. Based on their properties and relationships, a distribution is calculated and applied.
@@ -27,3 +27,8 @@ https://yourserver.com/new?prototypeUrl=https://imld.de/docs/projects/vistribute
 Replace the `yourserver.com` with the URL of you Webstrates/Codestrates server.
 
 You can also [access a demo on the official Webstrates demo server](https://demo.webstrates.net/new?prototypeUrl=https://imld.de/docs/projects/vistribute/vistribute-webstrates-demo.zip). Clicking the link creates a new instance of the demo; to connect other devices simply enter the displayed URL (e.g., `demo.webstrates.net/verb-animal-00/`) on them.
+
+### Usage
+When opening the application, all visualizations are loaded and automatically placed on the interface. As soon as devices join/leave or visualizations are created/removed, the distribution updates again.
+
+The overlaid interface can be toggled by pressing `Ctrl`+`O`. The blue Vistribute button in the bottom right allows to access the control panel, showing all connected devices and available visualizations.
